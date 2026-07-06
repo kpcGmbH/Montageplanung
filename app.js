@@ -11,6 +11,8 @@
   const isoStr = (ms) => { const d = new Date(ms); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`; };
   const fmt = (ms) => { const d = new Date(ms); return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth()+1)}.${d.getUTCFullYear()}`; };
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  // Heutiges Datum (lokaler Kalendertag) als UTC-Mitternacht-ms – die „Heute"-Linie läuft mit.
+  const todayMs = () => { const d = new Date(); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
 
   function isoWeek(ms) {
     const d = new Date(ms);
@@ -361,7 +363,7 @@
         for (const row of rows) { body.appendChild(makeRow(group, row, idx++, false)); visible++; }
       }
     }
-    const todayIdx = dayIndex(parse(PLAN.today), startMs);
+    const todayIdx = dayIndex(todayMs(), startMs);
     if (todayIdx >= 0 && todayIdx < totalDays) {
       const line = el('div', 'todayline');
       line.style.left = `calc(var(--label-w) + ${todayIdx * dayWidth + Math.floor(dayWidth/2)}px)`;
@@ -713,7 +715,7 @@
     urlaub:    { label: 'Urlaub' },
   };
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
-  let selMonday = mondayMs(parse(PLAN.today));
+  let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
 
   function weekPeople() {
@@ -828,7 +830,7 @@
     if (!count) alert('Keine konkret zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan Termine Monteuren zu (Termin anklicken → „Konkret zuordnen"), oder ziehe Baustellen aus der Palette in die Zellen.');
   }
   function scrollToToday() {
-    const todayIdx = dayIndex(parse(PLAN.today), startMs);
+    const todayIdx = dayIndex(todayMs(), startMs);
     const labelW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--label-w'));
     viewport.scrollLeft = Math.max(0, todayIdx * dayWidth - viewport.clientWidth / 2 + labelW);
   }
@@ -876,7 +878,7 @@
   document.getElementById('viewWeek').onclick = () => setView('week');
   document.getElementById('wkPrev').onclick = () => { selMonday = addDays(selMonday, -7); renderWeek(); };
   document.getElementById('wkNext').onclick = () => { selMonday = addDays(selMonday, 7); renderWeek(); };
-  document.getElementById('wkToday').onclick = () => { selMonday = mondayMs(parse(PLAN.today)); renderWeek(); };
+  document.getElementById('wkToday').onclick = () => { selMonday = mondayMs(todayMs()); renderWeek(); };
   document.getElementById('wkVorplan').onclick = () => vorplanung();
 
   document.getElementById('zoomIn').onclick = () => { dayWidth = Math.min(48, dayWidth + 4); render(); };
