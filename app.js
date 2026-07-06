@@ -585,7 +585,12 @@
       const cnt = document.createElement('input'); cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.value = ph.count || 1; cnt.title = 'Anzahl Personen';
       cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
       const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
-      rowEl.appendChild(sel); rowEl.appendChild(von); rowEl.appendChild(bis); rowEl.appendChild(cnt); rowEl.appendChild(del);
+      const line2 = el('div', 'phase-row2');
+      const vonL = el('label', 'phase-fld', 'Von'); vonL.appendChild(von);
+      const bisL = el('label', 'phase-fld', 'Bis'); bisL.appendChild(bis);
+      const cntL = el('label', 'phase-fld phase-cnt', 'Anz.'); cntL.appendChild(cnt);
+      line2.appendChild(vonL); line2.appendChild(bisL); line2.appendChild(cntL); line2.appendChild(del);
+      rowEl.appendChild(sel); rowEl.appendChild(line2);
       fPhases.appendChild(rowEl);
     });
   }
