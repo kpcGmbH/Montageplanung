@@ -1,0 +1,13 @@
+# Build-Ausgabe (aus build.py generiert)
+dist/
+
+# Lokale Tool-/Editor-Konfiguration
+.claude/
+
+# Versehentliches leeres Unter-Repo
+Montageplanung/
+
+# System / Python
+.DS_Store
+__pycache__/
+*.pyc

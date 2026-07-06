@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Montageplanung – Zeitplan</title>
+  <link rel="stylesheet" href="styles.css?v=2">
+</head>
+<body>
+  <div class="app">
+    <div class="toolbar">
+      <div class="brand">Montageplanung</div>
+      <div class="btn-group view-toggle">
+        <button id="viewTimeline" class="btn active" title="Zeitplan &amp; Auslastung">Zeitplan</button>
+        <button id="viewWeek" class="btn" title="Wochen-Einsatzplan">Woche</button>
+      </div>
+      <input id="search" class="search timeline-only" type="search" placeholder="Projekt / Montage suchen…">
+      <div class="btn-group timeline-only">
+        <button id="zoomOut" class="btn" title="Verkleinern">−</button>
+        <button id="zoomIn" class="btn" title="Vergrößern">+</button>
+      </div>
+      <button id="addProject" class="btn primary" title="Neue Projektzeile anlegen">+ Projekt</button>
+      <button id="manageTeam" class="btn" title="Monteure verwalten">Monteure</button>
+      <button id="addResource" class="btn" title="Ressourcen-Zeile anlegen (Urlaub, externe Trupps)">+ Ressource</button>
+      <button id="addBauleiter" class="btn" title="Bauleiter anlegen (ohne Kapazitätswirkung)">+ Bauleiter</button>
+      <button id="today" class="btn timeline-only">Heute</button>
+      <button id="reset" class="btn" title="Beispieldaten wiederherstellen">Zurücksetzen</button>
+      <div class="spacer"></div>
+      <span id="cloudStatus" class="cloud-status off" title="Cloud-Status (Microsoft/SharePoint)">offline (lokal)</span>
+      <button id="cloudReload" class="btn" title="Geteilten Stand neu laden">↻ Laden</button>
+      <button id="cloudLogin" class="btn">Anmelden</button>
+      <div id="legend" class="legend timeline-only"></div>
+    </div>
+    <div class="hint" id="hint">Doppelklick auf eine leere Zeile = neuer Termin &nbsp;·&nbsp; Balken ziehen = verschieben &nbsp;·&nbsp; Ränder ziehen = Dauer ändern &nbsp;·&nbsp; Klick = bearbeiten</div>
+    <div class="weekbar" id="weekbar" hidden>
+      <div class="btn-group">
+        <button id="wkPrev" class="btn" title="Vorige Woche">‹</button>
+        <button id="wkNext" class="btn" title="Nächste Woche">›</button>
+      </div>
+      <span id="wkLabel" class="wk-label"></span>
+      <button id="wkToday" class="btn">Diese Woche</button>
+      <button id="wkVorplan" class="btn primary" title="Woche aus den im Zeitplan zugeordneten Monteuren vorbelegen">Vorplanung aus Zeitplan</button>
+      <span class="wk-hint">Baustellen ziehen →</span>
+      <div id="wkPalette" class="wk-palette"></div>
+    </div>
+    <div id="viewport" class="viewport"></div>
+  </div>
+
+  <!-- Zellen-Editor (Wochenplan) -->
+  <div id="woverlay" class="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true">
+      <h3 id="wTitle">Eintrag</h3>
+      <label>Baustelle / Text
+        <input id="w-text" type="text" placeholder="z. B. Berlin Upbeat">
+      </label>
+      <label>Typ / Farbe
+        <select id="w-type"></select>
+      </label>
+      <div class="dialog-actions">
+        <button id="w-delete" class="btn danger">Löschen</button>
+        <div class="spacer"></div>
+        <button id="w-cancel" class="btn">Abbrechen</button>
+        <button id="w-save" class="btn primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ressourcen-Zeilen-Dialog -->
+  <div id="roverlay" class="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true">
+      <h3 id="rTitle">Ressourcen-Zeile</h3>
+      <label>Bezeichnung
+        <input id="r-name" type="text" placeholder="z. B. Urlaub Monteure / Bauleiter Urlaub">
+      </label>
+      <label id="r-role-wrap">Wirkung auf die Kapazität
+        <select id="r-role">
+          <option value="monteur">Monteur-Urlaub – reduziert Kapazität (−1)</option>
+          <option value="extern">Externe Trupps – erhöhen Kapazität bei Buchung (+1)</option>
+          <option value="none">Nur Info (z. B. Bauleiter) – keine Kapazität</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button id="r-delete" class="btn danger">Löschen</button>
+        <div class="spacer"></div>
+        <button id="r-cancel" class="btn">Abbrechen</button>
+        <button id="r-save" class="btn primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monteure-Dialog -->
+  <div id="moverlay" class="overlay" hidden>
+    <div class="dialog wide" role="dialog" aria-modal="true">
+      <h3>Monteure verwalten</h3>
+      <div id="m-cap" class="m-cap"></div>
+      <div id="m-list" class="m-list"></div>
+      <div class="dialog-actions">
+        <button id="m-add" class="btn">+ Monteur</button>
+        <div class="spacer"></div>
+        <button id="m-close" class="btn primary">Fertig</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Projekt-Dialog -->
+  <div id="poverlay" class="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true">
+      <h3 id="pTitle">Neues Projekt</h3>
+      <label>Baustelle (optional)
+        <input id="p-site" type="text" placeholder="leer = Einzelprojekt · z. B. 908 Berlin Upbeat">
+      </label>
+      <label id="p-nr-wrap">Projektnummer
+        <input id="p-nr" type="text" placeholder="z. B. 1095">
+      </label>
+      <label id="p-ort-wrap">Ort
+        <input id="p-ort" type="text" placeholder="z. B. Wiesbaden">
+      </label>
+      <label><span id="p-name-label">Projektname</span>
+        <input id="p-name" type="text" placeholder="z. B. Kantine Neubau">
+      </label>
+      <div class="dialog-actions">
+        <button id="p-delete" class="btn danger">Löschen</button>
+        <div class="spacer"></div>
+        <button id="p-cancel" class="btn">Abbrechen</button>
+        <button id="p-save" class="btn primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bearbeiten-Dialog -->
+  <div id="overlay" class="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true">
+      <h3 id="dlgTitle">Termin bearbeiten</h3>
+      <label>Bezeichnung
+        <input id="f-label" type="text" placeholder="z. B. Montage Küche">
+      </label>
+      <label>Kategorie
+        <select id="f-cat"></select>
+      </label>
+      <div class="row2">
+        <label>Von <input id="f-start" type="date"></label>
+        <label>Bis <input id="f-end" type="date"></label>
+      </div>
+      <fieldset class="crew">
+        <legend>Ressourcen (Personalbedarf)</legend>
+        <div class="row2">
+          <label>Benötigte Monteure <input id="f-count" type="number" min="0" step="1" value="0"></label>
+          <label>Arbeitstage im Fenster <input id="f-days" type="number" min="0" step="1" value="0"></label>
+        </div>
+        <div class="assign">
+          <span class="assign-title">Konkret zuordnen (optional)</span>
+          <div id="f-assign" class="assign-list"></div>
+        </div>
+      </fieldset>
+      <div class="dialog-actions">
+        <button id="f-delete" class="btn danger">Löschen</button>
+        <div class="spacer"></div>
+        <button id="f-cancel" class="btn">Abbrechen</button>
+        <button id="f-save" class="btn primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
+  <script src="data.js?v=2"></script>
+  <script src="cloud.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+</body>
+</html>
