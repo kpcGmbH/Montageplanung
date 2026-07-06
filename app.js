@@ -82,9 +82,7 @@
       if (g.name !== 'Projekte') continue;
       for (const row of g.rows) for (const bar of row.bars) {
         if (bar.crew || (bar.phases && bar.phases.length) || bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
-        const x0 = dayIndex(parse(bar.start), startMs), x1 = dayIndex(parse(bar.end), startMs);
-        const wd = Math.max(1, workingDaysIn(clamp(x0,0,totalDays-1), clamp(x1,0,totalDays-1)));
-        bar.crew = { count: bar.cat === 'preplanning' ? 2 : 1, days: Math.min(wd, 5), assigned: [] };
+        bar.crew = { count: bar.cat === 'preplanning' ? 2 : 1, start: bar.start, end: bar.end, assigned: [] };
       }
     }
   }
@@ -178,12 +176,16 @@
           continue;
         }
         if (!bar.crew) continue;
-        const count = +bar.crew.count || 0, need = +bar.crew.days || 0;
-        if (count <= 0 || need <= 0) continue;
-        const x0 = clamp(dayIndex(parse(bar.start), startMs), 0, totalDays-1);
-        const x1 = clamp(dayIndex(parse(bar.end), startMs), 0, totalDays-1);
+        const count = +bar.crew.count || 0;
+        if (count <= 0) continue;
+        const cs = bar.crew.start || bar.start, ce = bar.crew.end || bar.end;
+        const x0 = clamp(dayIndex(parse(cs), startMs), 0, totalDays-1);
+        const x1 = clamp(dayIndex(parse(ce), startMs), 0, totalDays-1);
         const slots = []; for (let i = x0; i <= x1; i++) if (days[i].work) slots.push(i);
-        if (slots.length < need) infeasible.add(bar); // Fenster zu kurz
+        if (!slots.length) continue;
+        let need;
+        if (bar.crew.start) { need = slots.length; }  // konkreter Einsatz-Zeitraum (feste Lage)
+        else { need = Math.min(+bar.crew.days || slots.length, slots.length); if (slots.length < (+bar.crew.days || 0)) infeasible.add(bar); } // Legacy: Arbeitstage im Fenster
         jobs.push({ bar, count, need, slots, slack: slots.length - need, x0 });
       }
     }
@@ -311,8 +313,12 @@
     b.style.width = Math.max((x1 - x0 + 1) * dayWidth - 2, dayWidth - 2) + 'px';
     b.style.background = cat.fill; b.style.borderColor = cat.border; b.style.color = cat.text;
     b.appendChild(el('span', 'lbl', bar.label || ''));
-    if (bar.crew && bar.crew.count > 0 && bar.crew.days > 0)
-      b.appendChild(el('span', 'badge', `${bar.crew.count}×${bar.crew.days}T`));
+    if (bar.crew && bar.crew.count > 0) {
+      const nd = bar.crew.start
+        ? workingDaysIn(clamp(dayIndex(parse(bar.crew.start), startMs), 0, totalDays-1), clamp(dayIndex(parse(bar.crew.end || bar.crew.start), startMs), 0, totalDays-1))
+        : (+bar.crew.days || 0);
+      if (nd > 0) b.appendChild(el('span', 'badge', `${bar.crew.count}×${nd}T`));
+    }
     const reqTrade = bar.crew && bar.crew.trade && TRADES()[bar.crew.trade];
     if (reqTrade) {
       const tg = el('span', 'trade-tag', reqTrade.short); tg.style.background = reqTrade.color; tg.style.marginLeft = '4px'; tg.title = 'Benötigtes Gewerk: ' + reqTrade.label;
@@ -323,7 +329,7 @@
     b.appendChild(el('div', 'h h-l'));
     b.appendChild(el('div', 'h h-r'));
     const crewTxt = bar.crew && bar.crew.count
-      ? `\nBedarf: ${bar.crew.count} Monteure · ${bar.crew.days} Arbeitstage`
+      ? `\nBedarf: ${bar.crew.count} Monteure · ${bar.crew.start ? fmt(parse(bar.crew.start)) + '–' + fmt(parse(bar.crew.end || bar.crew.start)) : (bar.crew.days || 0) + ' Arbeitstage'}`
         + (reqTrade ? `\nGewerk: ${reqTrade.label}` : '')
         + (bar.crew.assigned && bar.crew.assigned.length ? `\nZugeordnet: ${bar.crew.assigned.map(monteurName).join(', ')}` : '')
       : '';
@@ -531,7 +537,8 @@
   const fStart = document.getElementById('f-start');
   const fEnd = document.getElementById('f-end');
   const fCount = document.getElementById('f-count');
-  const fDays = document.getElementById('f-days');
+  const fCrewStart = document.getElementById('f-crew-start');
+  const fCrewEnd = document.getElementById('f-crew-end');
   const fAssign = document.getElementById('f-assign');
   const fTrade = document.getElementById('f-trade');
   let current = null;
@@ -615,7 +622,8 @@
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     fCount.value = bar.crew.count || 0;
-    fDays.value = bar.crew.days || 0;
+    fCrewStart.value = bar.crew.start || bar.start;
+    fCrewEnd.value = bar.crew.end || bar.end;
     fTrade.value = bar.crew.trade || '';
     buildAssignList(fTrade.value);
     const ass = new Set(bar.crew.assigned || []);
@@ -645,7 +653,9 @@
     } else {
       bar.cat = fCat.value;
       const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
-      bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), trade: fTrade.value || undefined, assigned };
+      let cs = fCrewStart.value || bar.start, ce = fCrewEnd.value || bar.end;
+      if (parse(ce) < parse(cs)) ce = cs;
+      bar.crew = { count: Math.max(0, +fCount.value || 0), start: cs, end: ce, trade: fTrade.value || undefined, assigned };
       bar.phases = phaseDraft.length
         ? phaseDraft.map(p => ({ trade: p.trade, start: p.start, end: p.end, count: Math.max(1, +p.count || 1) }))
         : undefined;
