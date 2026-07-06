@@ -11,7 +11,8 @@ const PLAN = {
     confirmed:    { label: 'Bestätigter Projekttermin',          fill: '#62a92f', border: '#46801f', text: '#10300a' },
     subcontractor:{ label: 'Externe Montage (Nachunternehmer)',  fill: '#f3d011', border: '#c9a800', text: '#3a3000' },
     preplanning:  { label: 'Vorplanung / nicht bestätigt',       fill: '#ec8a2b', border: '#c46a14', text: '#3a1f00' },
-    vacation:     { label: 'Urlaub / externe Trupps',            fill: '#39c0d8', border: '#1f97ad', text: '#053038' },
+    vacation:     { label: 'Urlaub',                             fill: '#39c0d8', border: '#1f97ad', text: '#053038' },
+    booking:      { label: 'Externe Trupps (Buchung)',           fill: '#b39ddb', border: '#8f77c4', text: '#2b1e52' },
   },
 
   // Gewerke/Qualifikationen (Katalog). Pro Monteur beliebig kombinierbar.

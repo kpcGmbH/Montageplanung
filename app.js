@@ -99,7 +99,7 @@
     const keep = /steinacker|schulung|nicht zugeordnet/i;
     const generic = g.rows.filter(r => !keep.test(r.label || ''));
     if (!generic.length) return;
-    const strip = (b) => Object.assign({ start: b.start, end: b.end, label: b.label || '', cat: 'vacation' }, b.size ? { size: b.size } : {});
+    const strip = (b, extern) => Object.assign({ start: b.start, end: b.end, label: b.label || '', cat: extern ? 'booking' : 'vacation' }, b.size ? { size: b.size } : {});
     const matchMember = (lbl) => {
       const t = (lbl || '').toLowerCase(); if (!t) return null;
       for (const m of PLAN.team) { const f = (m.name || '').split(/[\s/]/)[0].toLowerCase(); if (f && t.includes(f)) return m; }
@@ -108,8 +108,8 @@
     const leftover = [];
     for (const row of generic) for (const bar of (row.bars || [])) {
       const m = matchMember(bar.label);
-      if (m) { (m.bars = m.bars || []).push(strip(bar)); }
-      else leftover.push(strip(bar));
+      if (m) { (m.bars = m.bars || []).push(strip(bar, m.type === 'extern')); }
+      else leftover.push(strip(bar, false));
     }
     g.rows = g.rows.filter(r => keep.test(r.label || ''));
     if (leftover.length) g.rows.push({ id: 'res-leftover', label: 'Urlaub (nicht zugeordnet)', capRole: 'monteur', bars: leftover });
@@ -139,7 +139,6 @@
       const extern = m.type === 'extern';
       const def = +m.size || 1; // Standard-Truppstärke des externen Monteurs
       for (const bar of (m.bars || [])) {
-        if (bar.cat !== 'vacation') continue;
         const x0 = clamp(dayIndex(parse(bar.start), startMs), 0, totalDays-1);
         const x1 = clamp(dayIndex(parse(bar.end), startMs), 0, totalDays-1);
         const delta = extern ? (+bar.size || def) : -1;
@@ -153,7 +152,7 @@
       if (r.capRole !== 'monteur' && r.capRole !== 'extern') continue;
       const delta = r.capRole === 'extern' ? +1 : -1;
       for (const bar of r.bars) {
-        if (bar.cat !== 'vacation') continue;
+        if (bar.cat !== 'vacation' && bar.cat !== 'booking') continue;
         const x0 = clamp(dayIndex(parse(bar.start), startMs), 0, totalDays-1);
         const x1 = clamp(dayIndex(parse(bar.end), startMs), 0, totalDays-1);
         for (let i = x0; i <= x1; i++) if (days[i].work) cap[i] = Math.max(0, cap[i] + delta);
@@ -277,8 +276,12 @@
     return wrap;
   }
 
+  // Effektive Kategorie (= Farbe): externe Monteur-Zeile → Buchung, interne → Urlaub, sonst die Bar-Kategorie
+  function effCat(row, bar) {
+    return row.capRole === 'extern' ? 'booking' : row.capRole === 'monteur' ? 'vacation' : bar.cat;
+  }
   function makeBar(row, bar, flags) {
-    const cat = PLAN.categories[bar.cat] || PLAN.categories.preplanning;
+    const cat = PLAN.categories[effCat(row, bar)] || PLAN.categories.preplanning;
     const x0 = dayIndex(parse(bar.start), startMs);
     const x1 = dayIndex(parse(bar.end), startMs);
     const reasons = flags.get(bar);
@@ -343,13 +346,13 @@
         const ms = addDays(startMs, day);
         const s = isoStr(ms);
         const bar = (row.capRole === 'extern' || row.capRole === 'monteur')
-          ? { start: s, end: s, label: '', cat: 'vacation' }   // extern erbt Standard-Truppstärke des Monteurs
+          ? { start: s, end: s, label: '', cat: row.capRole === 'extern' ? 'booking' : 'vacation' }
           : { start: s, end: s, label: '', cat: 'preplanning', crew: { count: 1, days: 1, assigned: [] } };
         row.bars.push(bar);
         openEditor(row, bar, true);
       });
       for (const bar of row.bars) {
-        if (hiddenCats.has(bar.cat)) continue;
+        if (hiddenCats.has(effCat(row, bar))) continue;
         track.appendChild(makeBar(row, bar, flags));
       }
       r.appendChild(label); r.appendChild(track);
@@ -513,6 +516,7 @@
     fStart.value = bar.start; fEnd.value = bar.end;
     // Kontextabhängige Felder
     document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Personalbedarf nur bei Projekten
+    document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     fCount.value = bar.crew.count || 0;
@@ -528,18 +532,20 @@
     if (!current) return;
     const { row, bar } = current;
     bar.label = fLabel.value.trim();
-    bar.cat = fCat.value;
     let s = fStart.value || bar.start, e = fEnd.value || bar.end;
     if (parse(e) < parse(s)) e = s;
     bar.start = s; bar.end = e;
     if (row.capRole === 'extern') {
+      bar.cat = 'booking';
       const val = Math.max(1, +document.getElementById('f-size').value || 1);
       const def = (row._member && +row._member.size) || 1;
       if (val === def) delete bar.size; else bar.size = val;  // = Standard → erben; sonst überschreiben
       delete bar.crew;
     } else if (row.capRole === 'monteur') {
+      bar.cat = 'vacation';
       delete bar.crew; delete bar.size;
     } else {
+      bar.cat = fCat.value;
       const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
       bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), assigned };
     }
