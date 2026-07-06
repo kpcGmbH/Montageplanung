@@ -1046,7 +1046,7 @@
           e.preventDefault(); cell.classList.remove('drop');
           let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
           if (data.from) moveAssignment(data.from, key);
-          else if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type }; save(); renderWeek(); }
+          else if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
         });
         cell.addEventListener('click', () => openCellEditor(key, p, ms));
         grid.appendChild(cell);
@@ -1060,18 +1060,23 @@
   function moveAssignment(fromKey, toKey) {
     if (fromKey === toKey) return;
     const src = assignments[fromKey], dst = assignments[toKey];
-    if (dst) { delete dst.auto; assignments[fromKey] = dst; } else delete assignments[fromKey];
-    if (src) delete src.auto;   // manuell verschoben → nicht mehr automatisch
+    if (dst) { dst.auto = false; assignments[fromKey] = dst; } else delete assignments[fromKey];
+    if (src) src.auto = false;   // manuell verschoben → geschützt
     assignments[toKey] = src;
     save(); renderWeek();
   }
-  // Baut die AUTOMATISCH aus dem Zeitplan erzeugten Einträge dieser Woche neu auf.
-  // fillOnly=true: nur leere Zellen füllen (Vorplanung). fillOnly=false: erst alte Auto-Einträge löschen (Aktualisieren).
+  // Automatisch erzeugbar (= darf beim Aktualisieren ersetzt werden): explizit auto ODER
+  // ein Baustellen-Eintrag ohne Markierung (Alt-Einträge aus früheren Vorplanungen).
+  // Geschützt (manuell): auto === false, oder Nicht-Baustelle (Büro/n.v./Urlaub/IBN).
+  const isAutoCell = (a) => !!a && a.auto !== false && (a.auto === true || a.type === 'baustelle');
+  // Baut die automatisch erzeugten Einträge dieser Woche neu auf.
+  // fillOnly=true: nur leere Zellen füllen (Vorplanung). fillOnly=false: Auto-Einträge erst löschen (Aktualisieren).
   function vorplanung(fillOnly) {
     if (!fillOnly) {
+      const w1 = addDays(selMonday, 6);
       for (const k of Object.keys(assignments)) {
-        const [pid, d] = k.split('|');
-        if (assignments[k] && assignments[k].auto && parse(d) >= selMonday && parse(d) <= addDays(selMonday, 6)) delete assignments[k];
+        const d = k.split('|')[1];
+        if (parse(d) >= selMonday && parse(d) <= w1 && isAutoCell(assignments[k])) delete assignments[k];
       }
     }
     let count = 0;
@@ -1122,7 +1127,7 @@
   document.getElementById('w-save').onclick = () => {
     if (!curCell) return;
     const text = wText.value.trim();
-    if (!text) delete assignments[curCell]; else assignments[curCell] = { text, type: wType.value };
+    if (!text) delete assignments[curCell]; else assignments[curCell] = { text, type: wType.value, auto: false };
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-delete').onclick = () => { if (curCell) delete assignments[curCell]; save(); renderWeek(); closeCellEditor(); };
