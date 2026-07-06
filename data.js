@@ -17,9 +17,10 @@ const PLAN = {
 
   // Gewerke/Qualifikationen (Katalog). Pro Monteur beliebig kombinierbar.
   trades: {
-    elektrik:  { label: 'Elektriker',       short: 'E',  color: '#f0a020' },
-    sanitaer:  { label: 'Sanitär',          short: 'S',  color: '#2f80c4' },
-    edelstahl: { label: 'Edelstahlmonteur', short: 'Ed', color: '#6b7b8a' },
+    elektrik:       { label: 'Elektriker',                short: 'E',  color: '#f0a020' },
+    sanitaer:       { label: 'Sanitär',                   short: 'S',  color: '#2f80c4' },
+    sanitaer_klein: { label: 'Kleine Sanitäranschlüsse',  short: 'Sk', color: '#7fb3d5' },
+    edelstahl:      { label: 'Edelstahlmonteur',          short: 'Ed', color: '#6b7b8a' },
   },
 
   // Monteure-Team (Basis für die Kapazität/Auslastung).

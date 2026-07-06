@@ -266,6 +266,14 @@
   }
   const monteurName = (id) => { const m = PLAN.team.find(t => t.id === id); return m ? m.name : id; };
   const TRADES = () => PLAN.trades || {};
+  // Kann der Monteur das Gewerk? Volle Sanitär-Qualifikation deckt auch kleine Sanitäranschlüsse ab.
+  function qualifies(m, tradeKey) {
+    if (!tradeKey) return true;
+    const t = m.trades || [];
+    if (t.includes(tradeKey)) return true;
+    if (tradeKey === 'sanitaer_klein' && t.includes('sanitaer')) return true;
+    return false;
+  }
   function tradeTags(trades) {
     const wrap = el('span', 'trade-tags');
     for (const key of (trades || [])) {
@@ -292,12 +300,18 @@
     b.appendChild(el('span', 'lbl', bar.label || ''));
     if (bar.crew && bar.crew.count > 0 && bar.crew.days > 0)
       b.appendChild(el('span', 'badge', `${bar.crew.count}×${bar.crew.days}T`));
+    const reqTrade = bar.crew && bar.crew.trade && TRADES()[bar.crew.trade];
+    if (reqTrade) {
+      const tg = el('span', 'trade-tag', reqTrade.short); tg.style.background = reqTrade.color; tg.style.marginLeft = '4px'; tg.title = 'Benötigtes Gewerk: ' + reqTrade.label;
+      b.appendChild(tg);
+    }
     if (row.capRole === 'extern')
       b.appendChild(el('span', 'badge', `${(+bar.size || (row._member && +row._member.size) || 1)} P`));
     b.appendChild(el('div', 'h h-l'));
     b.appendChild(el('div', 'h h-r'));
     const crewTxt = bar.crew && bar.crew.count
       ? `\nBedarf: ${bar.crew.count} Monteure · ${bar.crew.days} Arbeitstage`
+        + (reqTrade ? `\nGewerk: ${reqTrade.label}` : '')
         + (bar.crew.assigned && bar.crew.assigned.length ? `\nZugeordnet: ${bar.crew.assigned.map(monteurName).join(', ')}` : '')
       : '';
     b.title = `${row.label}\n${bar.label || '(ohne Bezeichnung)'}\n${cat.label}\n${fmt(parse(bar.start))} – ${fmt(parse(bar.end))}${crewTxt}${reasons ? '\n⚠ ' + reasons.join('\n⚠ ') : ''}`;
@@ -484,25 +498,39 @@
   const fCount = document.getElementById('f-count');
   const fDays = document.getElementById('f-days');
   const fAssign = document.getElementById('f-assign');
+  const fTrade = document.getElementById('f-trade');
   let current = null;
 
   for (const key of Object.keys(PLAN.categories)) {
     const o = el('option', null, PLAN.categories[key].label); o.value = key; fCat.appendChild(o);
   }
-  // Monteur-Checkboxen (wird bei jedem Öffnen neu aufgebaut → immer aktuell)
-  function buildAssignList() {
+  // Gewerk-Auswahl (Benötigtes Gewerk)
+  { const o = el('option', null, '— egal / kein bestimmtes —'); o.value = ''; fTrade.appendChild(o);
+    for (const key of Object.keys(TRADES())) { const o2 = el('option', null, TRADES()[key].label); o2.value = key; fTrade.appendChild(o2); } }
+  // Monteur-Checkboxen; bei gewähltem Gewerk nur qualifizierte Monteure
+  function buildAssignList(filterTrade) {
     fAssign.innerHTML = '';
+    document.getElementById('f-assign-title').textContent = filterTrade
+      ? 'Konkret zuordnen (qualifiziert für ' + (TRADES()[filterTrade] ? TRADES()[filterTrade].label : filterTrade) + ')'
+      : 'Konkret zuordnen (optional)';
     for (const m of PLAN.team) {
+      if (filterTrade && !qualifies(m, filterTrade)) continue;
       const lab = el('label', null);
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = m.id;
       const span = el('span', m.type === 'extern' ? 'ext' : null, m.name + (m.type === 'extern' ? ' (ext)' : ''));
       lab.appendChild(cb); lab.appendChild(span); lab.appendChild(tradeTags(m.trades));
       fAssign.appendChild(lab);
     }
+    if (!fAssign.children.length) fAssign.appendChild(el('span', 'assign-empty', '— kein Monteur mit dieser Qualifikation —'));
   }
   fAssign.addEventListener('change', () => {
     const n = fAssign.querySelectorAll('input:checked').length;
     if (n > 0) fCount.value = n;
+  });
+  fTrade.addEventListener('change', () => {
+    const checked = new Set(Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value));
+    buildAssignList(fTrade.value);
+    fAssign.querySelectorAll('input').forEach(cb => { cb.checked = checked.has(cb.value); });
   });
 
   function openEditor(row, bar, isNew) {
@@ -521,7 +549,8 @@
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     fCount.value = bar.crew.count || 0;
     fDays.value = bar.crew.days || 0;
-    buildAssignList();
+    fTrade.value = bar.crew.trade || '';
+    buildAssignList(fTrade.value);
     const ass = new Set(bar.crew.assigned || []);
     fAssign.querySelectorAll('input').forEach(cb => { cb.checked = ass.has(cb.value); });
     overlay.hidden = false; fLabel.focus();
@@ -547,7 +576,7 @@
     } else {
       bar.cat = fCat.value;
       const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
-      bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), assigned };
+      bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), trade: fTrade.value || undefined, assigned };
     }
     save(); render(); closeEditor();
   };

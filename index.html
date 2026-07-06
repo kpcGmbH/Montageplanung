@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <div class="app">
@@ -163,12 +163,15 @@
       </label>
       <fieldset class="crew" id="f-crew-wrap">
         <legend>Ressourcen (Personalbedarf)</legend>
+        <label>Benötigtes Gewerk
+          <select id="f-trade"></select>
+        </label>
         <div class="row2">
           <label>Benötigte Monteure <input id="f-count" type="number" min="0" step="1" value="0"></label>
           <label>Arbeitstage im Fenster <input id="f-days" type="number" min="0" step="1" value="0"></label>
         </div>
         <div class="assign">
-          <span class="assign-title">Konkret zuordnen (optional)</span>
+          <span class="assign-title" id="f-assign-title">Konkret zuordnen (optional)</span>
           <div id="f-assign" class="assign-list"></div>
         </div>
       </fieldset>
@@ -181,8 +184,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=8"></script>
-  <script src="cloud.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="data.js?v=9"></script>
+  <script src="cloud.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

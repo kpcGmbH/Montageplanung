@@ -375,6 +375,7 @@ html, body {
 }
 .assign-list input { width: auto; }
 .assign-list .ext { color: #1f97ad; }
+.assign-empty { font-size: 11.5px; color: #b0453b; font-style: italic; }
 .dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .dialog-actions .spacer { flex: 1; }
 .btn.danger { color: #c0392b; border-color: #e3b4ad; }
