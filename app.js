@@ -89,6 +89,32 @@
     }
   }
 
+  // Einmalige Migration: die alten Sammelzeilen (Monteure Urlaub / Urlaub / ext. Monteure …)
+  // auf die jeweiligen Monteure der Liste verteilen. Verlustfrei: nicht zuordenbare
+  // Urlaube landen in einer Zeile „Urlaub (nicht zugeordnet)". Läuft nur, solange es noch
+  // Sammelzeilen gibt (danach automatisch inaktiv).
+  function migrateTeamResources() {
+    const g = PLAN.groups.find(x => x.name === 'Ressourcen / Monteure');
+    if (!g) return;
+    const keep = /steinacker|schulung|nicht zugeordnet/i;
+    const generic = g.rows.filter(r => !keep.test(r.label || ''));
+    if (!generic.length) return;
+    const strip = (b) => Object.assign({ start: b.start, end: b.end, label: b.label || '', cat: 'vacation' }, b.size ? { size: b.size } : {});
+    const matchMember = (lbl) => {
+      const t = (lbl || '').toLowerCase(); if (!t) return null;
+      for (const m of PLAN.team) { const f = (m.name || '').split(/[\s/]/)[0].toLowerCase(); if (f && t.includes(f)) return m; }
+      return null;
+    };
+    const leftover = [];
+    for (const row of generic) for (const bar of (row.bars || [])) {
+      const m = matchMember(bar.label);
+      if (m) { (m.bars = m.bars || []).push(strip(bar)); }
+      else leftover.push(strip(bar));
+    }
+    g.rows = g.rows.filter(r => keep.test(r.label || ''));
+    if (leftover.length) g.rows.push({ id: 'res-leftover', label: 'Urlaub (nicht zugeordnet)', capRole: 'monteur', bars: leftover });
+  }
+
   function el(tag, cls, txt) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -108,7 +134,19 @@
     const intern = internCount();
     for (let i = 0; i < totalDays; i++) cap[i] = days[i].work ? intern : 0;
 
-    // Nur Zeilen mit Kapazitäts-Rolle wirken: 'monteur' = Urlaub (−1), 'extern' = Buchung (+1).
+    // Verfügbarkeit je Monteur aus der Liste: interner Urlaub −1, externe Buchung +Truppstärke
+    for (const m of PLAN.team) {
+      const extern = m.type === 'extern';
+      for (const bar of (m.bars || [])) {
+        if (bar.cat !== 'vacation') continue;
+        const x0 = clamp(dayIndex(parse(bar.start), startMs), 0, totalDays-1);
+        const x1 = clamp(dayIndex(parse(bar.end), startMs), 0, totalDays-1);
+        const delta = extern ? (+bar.size || 1) : -1;
+        for (let i = x0; i <= x1; i++) if (days[i].work) cap[i] = Math.max(0, cap[i] + delta);
+      }
+    }
+
+    // Zusätzliche Datenzeilen mit Kapazitäts-Rolle: 'monteur' = Urlaub (−1), 'extern' = Buchung (+1).
     // 'none' (z. B. Bauleiter-Urlaub, Schulungen) bleibt ohne Wirkung.
     for (const g of PLAN.groups) for (const r of g.rows) {
       if (r.capRole !== 'monteur' && r.capRole !== 'extern') continue;
@@ -250,6 +288,8 @@
     b.appendChild(el('span', 'lbl', bar.label || ''));
     if (bar.crew && bar.crew.count > 0 && bar.crew.days > 0)
       b.appendChild(el('span', 'badge', `${bar.crew.count}×${bar.crew.days}T`));
+    if (row.capRole === 'extern' && bar.size >= 1)
+      b.appendChild(el('span', 'badge', `${bar.size} P`));
     b.appendChild(el('div', 'h h-l'));
     b.appendChild(el('div', 'h h-r'));
     const crewTxt = bar.crew && bar.crew.count
@@ -271,14 +311,19 @@
       const isProjects = group.name === 'Projekte';
       const isResources = group.name === 'Ressourcen / Monteure';
       const isBauleiter = group.name === 'Bauleiter';
+      const isTeam = !!row._member;
       const editable = isProjects || isResources || isBauleiter;
       const r = el('div', 'row' + (idx % 2 ? ' alt' : ''));
-      const roleTag = isResources && row.capRole && row.capRole !== 'monteur'
-        ? (row.capRole === 'extern' ? '  ⟂ extern' : '  ⓘ keine Kapazität') : '';
-      const label = el('div', 'label', row.label); label.title = row.label + roleTag + (editable ? '  (Doppelklick: bearbeiten)' : '');
+      const roleTag = row.capRole === 'extern' ? '  ⟂ extern'
+        : (isResources && row.capRole === 'none') ? '  ⓘ keine Kapazität' : '';
+      const label = el('div', 'label', row.label); label.title = row.label + roleTag + '  (Doppelklick: bearbeiten)';
       if (isResources && row.capRole === 'none') label.classList.add('row-info');
+      if (row.capRole === 'extern') label.classList.add('res-extern');
       if (indent) label.classList.add('area');
-      if (editable) {
+      if (isTeam) {
+        label.classList.add('editable');
+        label.addEventListener('dblclick', () => openTeamDialog());
+      } else if (editable) {
         label.classList.add('editable');
         label.addEventListener('dblclick', () => isProjects ? openProjectDialog(row) : openResourceDialog(row, isBauleiter ? 'bauleiter' : 'resource'));
         const del = el('span', 'row-del', '✕'); del.title = (isProjects ? (row.site ? 'Bereich' : 'Projekt') : isBauleiter ? 'Bauleiter' : 'Zeile') + ' löschen';
@@ -295,7 +340,10 @@
         if (e.target !== track) return;
         const day = clamp(Math.floor(e.offsetX / dayWidth), 0, totalDays - 1);
         const ms = addDays(startMs, day);
-        const bar = { start: isoStr(ms), end: isoStr(ms), label: '', cat: 'preplanning', crew: { count: 1, days: 1, assigned: [] } };
+        const s = isoStr(ms);
+        const bar = row.capRole === 'extern' ? { start: s, end: s, label: '', cat: 'vacation', size: 1 }
+          : row.capRole === 'monteur' ? { start: s, end: s, label: '', cat: 'vacation' }
+          : { start: s, end: s, label: '', cat: 'preplanning', crew: { count: 1, days: 1, assigned: [] } };
         row.bars.push(bar);
         openEditor(row, bar, true);
       });
@@ -339,10 +387,21 @@
 
     for (const group of PLAN.groups) {
       const rows = group.rows.filter(matches);
-      if (!rows.length) continue;
+      const isRes = group.name === 'Ressourcen / Monteure';
+      if (!rows.length && !(isRes && PLAN.team.length)) continue;
       body.appendChild(el('div', 'group-row', group.name));
       let idx = 0;
-      if (group.name === 'Projekte') {
+      if (isRes) {
+        // Eine Zeile pro Monteur aus der Liste (Team): intern = Urlaub, extern = Buchung/Truppstärke
+        const teamRows = PLAN.team.map(m => ({
+          _member: m, id: 'mon-' + m.id, label: m.name || '(ohne Name)',
+          capRole: m.type === 'extern' ? 'extern' : 'monteur',
+          bars: (m.bars = m.bars || [])
+        })).filter(matches);
+        for (const tr of teamRows) { body.appendChild(makeRow(group, tr, idx++, false)); visible++; }
+        // zusätzliche Datenzeilen (Steinacker, Schulungen, „nicht zugeordnet" …)
+        for (const row of rows) { body.appendChild(makeRow(group, row, idx++, false)); visible++; }
+      } else if (group.name === 'Projekte') {
         // Zeilen in Blöcke gruppieren: Baustellen (site) sammeln, Einzelprojekte einzeln
         const blocks = []; const bySite = {};
         for (const row of rows) {
@@ -444,11 +503,17 @@
 
   function openEditor(row, bar, isNew) {
     current = { row, bar, isNew };
+    const isExtern = row.capRole === 'extern';
+    const isMonteur = row.capRole === 'monteur';
     if (!bar.crew) bar.crew = { count: 0, days: 0, assigned: [] };
-    document.getElementById('dlgTitle').textContent = (isNew ? 'Neuer Termin' : 'Termin bearbeiten') + ' · ' + row.label;
+    document.getElementById('dlgTitle').textContent = (isNew ? 'Neuer Eintrag' : 'Bearbeiten') + ' · ' + row.label;
     fLabel.value = bar.label || '';
     fCat.value = bar.cat;
     fStart.value = bar.start; fEnd.value = bar.end;
+    // Kontextabhängige Felder
+    document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Personalbedarf nur bei Projekten
+    document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
+    document.getElementById('f-size').value = bar.size || 1;
     fCount.value = bar.crew.count || 0;
     fDays.value = bar.crew.days || 0;
     buildAssignList();
@@ -460,14 +525,21 @@
 
   document.getElementById('f-save').onclick = () => {
     if (!current) return;
-    const { bar } = current;
+    const { row, bar } = current;
     bar.label = fLabel.value.trim();
     bar.cat = fCat.value;
     let s = fStart.value || bar.start, e = fEnd.value || bar.end;
     if (parse(e) < parse(s)) e = s;
     bar.start = s; bar.end = e;
-    const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
-    bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), assigned };
+    if (row.capRole === 'extern') {
+      bar.size = Math.max(1, +document.getElementById('f-size').value || 1);
+      delete bar.crew;
+    } else if (row.capRole === 'monteur') {
+      delete bar.crew; delete bar.size;
+    } else {
+      const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
+      bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), assigned };
+    }
     save(); render(); closeEditor();
   };
   document.getElementById('f-delete').onclick = () => {
@@ -957,7 +1029,7 @@
         ? '\n\n⚠ Du bist angemeldet: Der importierte Stand ersetzt danach auch die gemeinsamen Daten in SharePoint.'
         : '';
       if (!confirm(`Plan aus "${f.name}" importieren?\n${rowN} Zeilen werden geladen und ERSETZEN den aktuellen Plan.${cloudNote}\n\nTipp: vorher „Export" für ein Backup.`)) { importFile.value = ''; return; }
-      applySnapshot(data); seedCrew(); save(); buildLegend(); render();
+      applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render();
       importFile.value = '';
       alert('Import fertig – ' + rowN + ' Zeilen geladen.');
     };
@@ -991,14 +1063,16 @@
   if (cloudReloadBtn) cloudReloadBtn.onclick = () => { if (window.Cloud) Cloud.reload(); };
 
   load();
+  migrateTeamResources();
   seedCrew();
+  saveLocal();
   buildLegend();
   render();
   scrollToToday();
 
   if (window.Cloud) {
     Cloud.onStatus(updateCloudUI);
-    Cloud.onApply((data) => { applySnapshot(data); seedCrew(); saveLocal(); buildLegend(); render(); });
+    Cloud.onApply((data) => { applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render(); });
     Cloud.init(); // asynchron: zieht bei Anmeldung den geteilten Stand und rendert neu
   }
 })();

@@ -170,6 +170,7 @@ html, body {
 .row:hover .label { background: #fff7ef; }
 .label.editable { padding-right: 18px; }
 .label.row-info { color: #8a8f96; font-style: italic; }
+.label.res-extern { color: #1f97ad; }
 .label.area { padding-left: 24px; color: #3a4046; }
 .label.area::before { content: '└'; position: absolute; left: 9px; color: #b4bac1; }
 
