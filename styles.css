@@ -145,15 +145,16 @@ html, body {
 /* Body */
 .body { position: relative; }
 .group-row {
-  position: sticky; left: 0;
-  display: flex; align-items: center;
-  height: 22px; background: #eef0f3;
+  height: 24px; background: #e7eaee;
   border-top: 1px solid var(--line-strong);
-  border-bottom: 1px solid var(--line);
-  font-weight: 700; font-size: 11px; letter-spacing: .4px;
-  text-transform: uppercase; color: #5b6168;
-  padding-left: 10px;
-  z-index: 25; width: var(--label-w);
+  border-bottom: 1px solid var(--line-strong);
+}
+.group-row-label {
+  position: sticky; left: 0; z-index: 25;
+  width: var(--label-w); height: 100%;
+  display: flex; align-items: center; padding-left: 10px;
+  font-weight: 700; font-size: 11px; letter-spacing: .5px;
+  text-transform: uppercase; color: #5b6168; background: #e7eaee;
 }
 .row { display: flex; height: var(--row-h); }
 .row:nth-child(even of .row) { background: var(--bg-alt); }

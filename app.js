@@ -444,11 +444,18 @@
       return r;
     }
 
+    function makeGroupRow(name) {
+      const gr = el('div', 'group-row');
+      gr.style.width = 'calc(var(--label-w) + ' + trackW + 'px)';
+      gr.appendChild(el('div', 'group-row-label', name));
+      return gr;
+    }
+
     for (const group of PLAN.groups) {
       const rows = group.rows.filter(matches);
       const isRes = group.name === 'Ressourcen / Monteure';
       if (!rows.length && !(isRes && PLAN.team.length)) continue;
-      body.appendChild(el('div', 'group-row', group.name));
+      body.appendChild(makeGroupRow(group.name));
       let idx = 0;
       if (isRes) {
         // Eine Zeile pro Monteur aus der Liste (Team): intern = Urlaub, extern = Buchung/Truppstärke
@@ -487,7 +494,7 @@
       line.style.left = `calc(var(--label-w) + ${todayIdx * dayWidth + Math.floor(dayWidth/2)}px)`;
       body.appendChild(line);
     }
-    if (!visible) body.appendChild(el('div', 'group-row', 'Keine Treffer'));
+    if (!visible) body.appendChild(makeGroupRow('Keine Treffer'));
     return body;
   }
 
