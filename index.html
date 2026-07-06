@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <div class="app">
@@ -24,10 +24,6 @@
       <button id="addResource" class="btn" title="Ressourcen-Zeile anlegen (Urlaub, externe Trupps)">+ Ressource</button>
       <button id="manageBauleiter" class="btn" title="Bauleiter verwalten">Bauleiter</button>
       <button id="today" class="btn timeline-only">Heute</button>
-      <button id="exportBtn" class="btn" title="Aktuellen Plan als JSON-Datei sichern">Export</button>
-      <button id="importBtn" class="btn" title="Plan aus JSON-Datei laden">Import</button>
-      <input id="importFile" type="file" accept="application/json,.json" hidden>
-      <button id="reset" class="btn" title="Beispieldaten wiederherstellen">Zurücksetzen</button>
       <div class="spacer"></div>
       <span id="cloudStatus" class="cloud-status off" title="Cloud-Status (Microsoft/SharePoint)">offline (lokal)</span>
       <button id="cloudReload" class="btn" title="Geteilten Stand neu laden">↻ Laden</button>
@@ -42,7 +38,8 @@
       </div>
       <span id="wkLabel" class="wk-label"></span>
       <button id="wkToday" class="btn">Diese Woche</button>
-      <button id="wkVorplan" class="btn primary" title="Woche aus den im Zeitplan zugeordneten Monteuren vorbelegen">Vorplanung aus Zeitplan</button>
+      <button id="wkVorplan" class="btn primary" title="Woche aus den im Zeitplan zugeordneten Monteuren vorbelegen (füllt leere Zellen)">Vorplanung aus Zeitplan</button>
+      <button id="wkRefresh" class="btn" title="Automatisch erzeugte Einträge auf den aktuellen Zeitplan-Stand bringen – manuelle Einträge bleiben erhalten">↻ Aktualisieren</button>
       <span class="wk-hint">Baustellen ziehen →</span>
       <div id="wkPalette" class="wk-palette"></div>
     </div>
@@ -176,8 +173,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=16"></script>
-  <script src="cloud.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="data.js?v=17"></script>
+  <script src="cloud.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

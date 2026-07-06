@@ -1060,11 +1060,20 @@
   function moveAssignment(fromKey, toKey) {
     if (fromKey === toKey) return;
     const src = assignments[fromKey], dst = assignments[toKey];
-    if (dst) assignments[fromKey] = dst; else delete assignments[fromKey];
+    if (dst) { delete dst.auto; assignments[fromKey] = dst; } else delete assignments[fromKey];
+    if (src) delete src.auto;   // manuell verschoben → nicht mehr automatisch
     assignments[toKey] = src;
     save(); renderWeek();
   }
-  function vorplanung() {
+  // Baut die AUTOMATISCH aus dem Zeitplan erzeugten Einträge dieser Woche neu auf.
+  // fillOnly=true: nur leere Zellen füllen (Vorplanung). fillOnly=false: erst alte Auto-Einträge löschen (Aktualisieren).
+  function vorplanung(fillOnly) {
+    if (!fillOnly) {
+      for (const k of Object.keys(assignments)) {
+        const [pid, d] = k.split('|');
+        if (assignments[k] && assignments[k].auto && parse(d) >= selMonday && parse(d) <= addDays(selMonday, 6)) delete assignments[k];
+      }
+    }
     let count = 0;
     // Trägt je Phase die zugeordneten Monteure an ihren Phasentagen (innerhalb der Woche) ins Raster ein.
     const place = (assigned, s, e, name) => {
@@ -1074,7 +1083,7 @@
           const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
           if (parse(s) > ms || parse(e) < ms) continue;
           const key = akey(pid, isoStr(ms));
-          if (!assignments[key]) { assignments[key] = { text: name, type: 'baustelle' }; count++; }
+          if (!assignments[key]) { assignments[key] = { text: name, type: 'baustelle', auto: true }; count++; }
         }
       }
     };
@@ -1087,7 +1096,7 @@
       }
     }
     save(); renderWeek();
-    if (!count) alert('Keine zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan den Montage-Phasen Monteure zu (Fenster-Balken anklicken → Phase → Monteure), oder ziehe Baustellen aus der Palette in die Zellen.');
+    if (!count && fillOnly) alert('Keine zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan den Montage-Phasen Monteure zu (Fenster-Balken anklicken → Phase → Monteure), oder ziehe Baustellen aus der Palette in die Zellen.');
   }
   function scrollToToday() {
     const todayIdx = dayIndex(todayMs(), startMs);
@@ -1139,49 +1148,14 @@
   document.getElementById('wkPrev').onclick = () => { selMonday = addDays(selMonday, -7); renderWeek(); };
   document.getElementById('wkNext').onclick = () => { selMonday = addDays(selMonday, 7); renderWeek(); };
   document.getElementById('wkToday').onclick = () => { selMonday = mondayMs(todayMs()); renderWeek(); };
-  document.getElementById('wkVorplan').onclick = () => vorplanung();
+  document.getElementById('wkVorplan').onclick = () => vorplanung(true);
+  document.getElementById('wkRefresh').onclick = () => vorplanung(false);
 
   document.getElementById('zoomIn').onclick = () => { dayWidth = Math.min(48, dayWidth + 4); render(); };
   document.getElementById('zoomOut').onclick = () => { dayWidth = Math.max(6, dayWidth - 4); render(); };
   document.getElementById('today').onclick = () => scrollToToday();
   document.getElementById('addProject').onclick = () => openProjectDialog(null);
   document.getElementById('addResource').onclick = () => openResourceDialog(null, 'resource');
-  document.getElementById('reset').onclick = () => {
-    if (!confirm('Alle Änderungen verwerfen und Beispieldaten wiederherstellen?')) return;
-    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-    location.reload();
-  };
-  // Export: aktuellen Plan als JSON sichern
-  document.getElementById('exportBtn').onclick = () => {
-    const blob = new Blob([JSON.stringify(snapshot(), null, 1)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'montageplanung-export.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
-  // Import: Plan aus JSON-Datei laden (und – falls angemeldet – in die Cloud schreiben)
-  const importFile = document.getElementById('importFile');
-  document.getElementById('importBtn').onclick = () => importFile.click();
-  importFile.onchange = () => {
-    const f = importFile.files && importFile.files[0];
-    if (!f) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      let data;
-      try { data = JSON.parse(rd.result); } catch (e) { alert('Das ist keine gültige JSON-Datei.'); importFile.value = ''; return; }
-      if (!data || !Array.isArray(data.groups)) { alert('Die Datei enthält keine Plandaten ("groups").'); importFile.value = ''; return; }
-      const rowN = data.groups.reduce((n, g) => n + (g.rows ? g.rows.length : 0), 0);
-      const cloudNote = (window.Cloud && Cloud.isReady())
-        ? '\n\n⚠ Du bist angemeldet: Der importierte Stand ersetzt danach auch die gemeinsamen Daten in SharePoint.'
-        : '';
-      if (!confirm(`Plan aus "${f.name}" importieren?\n${rowN} Zeilen werden geladen und ERSETZEN den aktuellen Plan.${cloudNote}\n\nTipp: vorher „Export" für ein Backup.`)) { importFile.value = ''; return; }
-      applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render();
-      importFile.value = '';
-      alert('Import fertig – ' + rowN + ' Zeilen geladen.');
-    };
-    rd.readAsText(f);
-  };
   document.getElementById('search').oninput = (e) => { filter = e.target.value.trim().toLowerCase(); render(); };
 
   const legend = document.getElementById('legend');
