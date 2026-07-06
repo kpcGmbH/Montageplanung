@@ -607,6 +607,47 @@
   document.getElementById('m-close').onclick = () => { moverlay.hidden = true; };
   moverlay.addEventListener('click', (e) => { if (e.target === moverlay) moverlay.hidden = true; });
 
+  // ---- Bauleiter-Dialog (Liste analog Monteure) ----
+  const bloverlay = document.getElementById('bloverlay');
+  const blList = document.getElementById('bl-list');
+  function bauleiterGroup() {
+    let g = PLAN.groups.find(x => x.name === 'Bauleiter');
+    if (!g) {
+      g = { name: 'Bauleiter', rows: [] };
+      const pi = PLAN.groups.findIndex(x => x.name === 'Projekte');
+      if (pi >= 0) PLAN.groups.splice(pi, 0, g); else PLAN.groups.push(g);
+    }
+    return g;
+  }
+  function renderBauleiterList() {
+    const g = bauleiterGroup();
+    document.getElementById('bl-cap').textContent = g.rows.length + ' Bauleiter · Urlaube im Zeitplan pro Person eintragbar (ohne Wirkung auf die Monteur-Kapazität)';
+    blList.innerHTML = '';
+    g.rows.forEach((row) => {
+      if (!row.bars) row.bars = [];
+      row.capRole = 'none';
+      const item = el('div', 'm-item');
+      const r1 = el('div', 'm-row1');
+      const name = document.createElement('input'); name.type = 'text'; name.value = row.label || ''; name.placeholder = 'Name';
+      name.addEventListener('input', () => { row.label = name.value; save(); render(); });
+      const del = el('span', 'm-del', '✕'); del.title = 'Bauleiter entfernen';
+      del.onclick = () => {
+        if (!confirm(`„${row.label || 'Bauleiter'}" wirklich entfernen?`)) return;
+        g.rows.splice(g.rows.indexOf(row), 1); save(); render(); renderBauleiterList();
+      };
+      r1.appendChild(name); r1.appendChild(del);
+      item.appendChild(r1); blList.appendChild(item);
+    });
+  }
+  document.getElementById('manageBauleiter').onclick = () => { renderBauleiterList(); bloverlay.hidden = false; };
+  document.getElementById('bl-add').onclick = () => {
+    bauleiterGroup().rows.push({ id: 'bl' + Date.now(), label: '', capRole: 'none', bars: [] });
+    save(); render(); renderBauleiterList();
+    const inputs = blList.querySelectorAll('input'); if (inputs.length) inputs[inputs.length - 1].focus();
+  };
+  document.getElementById('bl-close').onclick = () => { bloverlay.hidden = true; };
+  bloverlay.addEventListener('click', (e) => { if (e.target === bloverlay) bloverlay.hidden = true; });
+
   // ---- Projekt-Dialog (Nummer / Ort / Name) ----
   const poverlay = document.getElementById('poverlay');
   const pSite = document.getElementById('p-site');
@@ -886,7 +927,6 @@
   document.getElementById('today').onclick = () => scrollToToday();
   document.getElementById('addProject').onclick = () => openProjectDialog(null);
   document.getElementById('addResource').onclick = () => openResourceDialog(null, 'resource');
-  document.getElementById('addBauleiter').onclick = () => openResourceDialog(null, 'bauleiter');
   document.getElementById('reset').onclick = () => {
     if (!confirm('Alle Änderungen verwerfen und Beispieldaten wiederherstellen?')) return;
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
