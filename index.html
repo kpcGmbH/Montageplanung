@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <div class="app">
@@ -162,24 +162,10 @@
         <input id="f-size" type="number" min="1" step="1" value="1">
       </label>
       <fieldset class="crew" id="f-crew-wrap">
-        <legend>Ressourcen (Personalbedarf)</legend>
-        <label>Benötigtes Gewerk
-          <select id="f-trade"></select>
-        </label>
-        <div class="row2">
-          <label>Benötigte Monteure <input id="f-count" type="number" min="0" step="1" value="0"></label>
-          <label>Einsatz von <input id="f-crew-start" type="date"></label>
-          <label>Einsatz bis <input id="f-crew-end" type="date"></label>
-        </div>
-        <div class="assign">
-          <span class="assign-title" id="f-assign-title">Konkret zuordnen (optional)</span>
-          <div id="f-assign" class="assign-list"></div>
-        </div>
-        <div class="phases">
-          <span class="assign-title">Gewerk-Phasen im Zeitfenster (optional – überschreibt den Bedarf oben)</span>
-          <div id="f-phases"></div>
-          <button type="button" id="f-phase-add" class="btn">+ Phase</button>
-        </div>
+        <legend>Montage-Phasen (Gewerke im Fenster)</legend>
+        <div class="phase-hint">Der Hauptbalken ist nur das Montagefenster. Jede Phase = Gewerk · Zeitraum · Anzahl · Monteure.</div>
+        <div id="f-phases"></div>
+        <button type="button" id="f-phase-add" class="btn">+ Phase</button>
       </fieldset>
       <div class="dialog-actions">
         <button id="f-delete" class="btn danger">Löschen</button>
@@ -190,8 +176,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=14"></script>
-  <script src="cloud.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="data.js?v=16"></script>
+  <script src="cloud.js?v=16"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

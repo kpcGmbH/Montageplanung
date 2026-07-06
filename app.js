@@ -199,21 +199,22 @@
     return { demand, cap, infeasible };
   }
 
-  // ---- Engpass: konkret zugeordnete Monteure mit überlappenden Fenstern ----
+  // ---- Engpass: konkret zugeordnete Monteure mit überlappenden Einsätzen (je Phase) ----
   function computeConflicts() {
     const byMonteur = {};
+    const add = (id, s, e, bar) => { (byMonteur[id] = byMonteur[id] || []).push({ x0: dayIndex(parse(s), startMs), x1: dayIndex(parse(e), startMs), bar }); };
     for (const g of PLAN.groups) for (const r of g.rows) for (const bar of r.bars) {
-      const ass = bar.crew && bar.crew.assigned || [];
-      for (const id of ass) {
-        (byMonteur[id] = byMonteur[id] || []).push(bar);
+      if (bar.phases && bar.phases.length) {
+        for (const ph of bar.phases) for (const id of (ph.assigned || [])) add(id, ph.start, ph.end, bar);
+      } else if (bar.crew) {
+        for (const id of (bar.crew.assigned || [])) add(id, bar.crew.start || bar.start, bar.crew.end || bar.end, bar);
       }
     }
     const conflict = new Set();
     for (const id in byMonteur) {
-      const list = byMonteur[id].map(b => ({ b, x0: dayIndex(parse(b.start), startMs), x1: dayIndex(parse(b.end), startMs) }))
-                                .sort((a, z) => a.x0 - z.x0);
+      const list = byMonteur[id].sort((a, z) => a.x0 - z.x0);
       for (let i = 1; i < list.length; i++) {
-        if (list[i].x0 <= list[i-1].x1) { conflict.add(list[i].b); conflict.add(list[i-1].b); }
+        if (list[i].x0 <= list[i-1].x1) { conflict.add(list[i].bar); conflict.add(list[i-1].bar); }
       }
     }
     return conflict;
@@ -536,60 +537,31 @@
   const fCat = document.getElementById('f-cat');
   const fStart = document.getElementById('f-start');
   const fEnd = document.getElementById('f-end');
-  const fCount = document.getElementById('f-count');
-  const fCrewStart = document.getElementById('f-crew-start');
-  const fCrewEnd = document.getElementById('f-crew-end');
-  const fAssign = document.getElementById('f-assign');
-  const fTrade = document.getElementById('f-trade');
   let current = null;
 
   for (const key of Object.keys(PLAN.categories)) {
     const o = el('option', null, PLAN.categories[key].label); o.value = key; fCat.appendChild(o);
   }
-  // Gewerk-Auswahl (Benötigtes Gewerk)
-  { const o = el('option', null, '— egal / kein bestimmtes —'); o.value = ''; fTrade.appendChild(o);
-    for (const key of Object.keys(TRADES())) { const o2 = el('option', null, TRADES()[key].label); o2.value = key; fTrade.appendChild(o2); } }
-  // Monteur-Checkboxen; bei gewähltem Gewerk nur qualifizierte Monteure
-  function buildAssignList(filterTrade) {
-    fAssign.innerHTML = '';
-    document.getElementById('f-assign-title').textContent = filterTrade
-      ? 'Konkret zuordnen (qualifiziert für ' + (TRADES()[filterTrade] ? TRADES()[filterTrade].label : filterTrade) + ')'
-      : 'Konkret zuordnen (optional)';
-    for (const m of PLAN.team) {
-      if (filterTrade && !qualifies(m, filterTrade)) continue;
-      const lab = el('label', null);
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = m.id;
-      const span = el('span', m.type === 'extern' ? 'ext' : null, m.name + (m.type === 'extern' ? ' (ext)' : ''));
-      lab.appendChild(cb); lab.appendChild(span); lab.appendChild(tradeTags(m.trades));
-      fAssign.appendChild(lab);
-    }
-    if (!fAssign.children.length) fAssign.appendChild(el('span', 'assign-empty', '— kein Monteur mit dieser Qualifikation —'));
-  }
-  fAssign.addEventListener('change', () => {
-    const n = fAssign.querySelectorAll('input:checked').length;
-    if (n > 0) fCount.value = n;
-  });
-  fTrade.addEventListener('change', () => {
-    const checked = new Set(Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value));
-    buildAssignList(fTrade.value);
-    fAssign.querySelectorAll('input').forEach(cb => { cb.checked = checked.has(cb.value); });
-  });
 
-  // Gewerk-Phasen (Arbeitskopie während der Dialog offen ist)
+  // Montage-Phasen (Arbeitskopie während der Dialog offen ist)
   const fPhases = document.getElementById('f-phases');
   let phaseDraft = [];
   function renderPhaseList() {
     fPhases.innerHTML = '';
     phaseDraft.forEach((ph, i) => {
-      const rowEl = el('div', 'phase-row');
+      const card = el('div', 'phase-card');
+      // Gewerk
+      const gwL = el('label', 'phase-gw', 'Gewerk');
       const sel = document.createElement('select');
       for (const k of Object.keys(TRADES())) { const o = el('option', null, TRADES()[k].label); o.value = k; sel.appendChild(o); }
-      sel.value = ph.trade; sel.onchange = () => { ph.trade = sel.value; };
+      sel.value = ph.trade || 'edelstahl';
+      gwL.appendChild(sel);
+      // Zeitraum / Anzahl / Löschen
       const von = document.createElement('input'); von.type = 'date'; von.value = ph.start;
-      von.onchange = () => { ph.start = von.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
       const bis = document.createElement('input'); bis.type = 'date'; bis.value = ph.end;
-      bis.onchange = () => { ph.end = bis.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
       const cnt = document.createElement('input'); cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.value = ph.count || 1; cnt.title = 'Anzahl Personen';
+      von.onchange = () => { ph.start = von.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
+      bis.onchange = () => { ph.end = bis.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
       cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
       const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
       const line2 = el('div', 'phase-row2');
@@ -597,13 +569,53 @@
       const bisL = el('label', 'phase-fld', 'Bis'); bisL.appendChild(bis);
       const cntL = el('label', 'phase-fld phase-cnt', 'Anz.'); cntL.appendChild(cnt);
       line2.appendChild(vonL); line2.appendChild(bisL); line2.appendChild(cntL); line2.appendChild(del);
-      rowEl.appendChild(sel); rowEl.appendChild(line2);
-      fPhases.appendChild(rowEl);
+      // Monteur-Zuordnung – nur nach Gewerk qualifizierte
+      const asgTitle = el('div', 'assign-title', '');
+      const asg = el('div', 'assign-list');
+      const buildAsg = () => {
+        asgTitle.textContent = 'Monteure' + (ph.trade && TRADES()[ph.trade] ? ' (' + TRADES()[ph.trade].label + ')' : '');
+        asg.innerHTML = '';
+        let any = false;
+        for (const m of PLAN.team) {
+          if (ph.trade && !qualifies(m, ph.trade)) continue;
+          any = true;
+          const lab = el('label', null);
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = m.id; cb.checked = (ph.assigned || []).includes(m.id);
+          cb.onchange = () => {
+            ph.assigned = ph.assigned || [];
+            if (cb.checked) { if (!ph.assigned.includes(m.id)) ph.assigned.push(m.id); }
+            else ph.assigned = ph.assigned.filter(x => x !== m.id);
+            if (ph.assigned.length > (+ph.count || 0)) { ph.count = ph.assigned.length; cnt.value = ph.count; }
+          };
+          const span = el('span', m.type === 'extern' ? 'ext' : null, m.name + (m.type === 'extern' ? ' (ext)' : ''));
+          lab.appendChild(cb); lab.appendChild(span); lab.appendChild(tradeTags(m.trades));
+          asg.appendChild(lab);
+        }
+        if (!any) asg.appendChild(el('span', 'assign-empty', '— kein Monteur mit dieser Qualifikation —'));
+      };
+      sel.onchange = () => {
+        ph.trade = sel.value;
+        ph.assigned = (ph.assigned || []).filter(id => { const m = PLAN.team.find(t => t.id === id); return m && qualifies(m, ph.trade); });
+        buildAsg();
+      };
+      buildAsg();
+      card.appendChild(gwL); card.appendChild(line2); card.appendChild(asgTitle); card.appendChild(asg);
+      fPhases.appendChild(card);
     });
   }
   document.getElementById('f-phase-add').onclick = () => {
     const b = current && current.bar;
-    phaseDraft.push({ trade: 'edelstahl', start: (b && b.start) || fStart.value, end: (b && b.end) || fEnd.value, count: 1 });
+    const last = phaseDraft[phaseDraft.length - 1];
+    // Neue Phase erbt den Zeitraum der vorherigen (z. B. Elektro analog Edelstahl); Gewerk = nächstes noch nicht genutztes
+    const used = new Set(phaseDraft.map(p => p.trade));
+    const trade = last ? (Object.keys(TRADES()).find(k => !used.has(k)) || last.trade) : 'edelstahl';
+    phaseDraft.push({
+      trade,
+      start: last ? last.start : ((b && b.start) || fStart.value),
+      end: last ? last.end : ((b && b.end) || fEnd.value),
+      count: 1,
+      assigned: [],
+    });
     renderPhaseList();
   };
 
@@ -611,24 +623,23 @@
     current = { row, bar, isNew };
     const isExtern = row.capRole === 'extern';
     const isMonteur = row.capRole === 'monteur';
-    if (!bar.crew) bar.crew = { count: 0, days: 0, assigned: [] };
     document.getElementById('dlgTitle').textContent = (isNew ? 'Neuer Eintrag' : 'Bearbeiten') + ' · ' + row.label;
     fLabel.value = bar.label || '';
     fCat.value = bar.cat;
     fStart.value = bar.start; fEnd.value = bar.end;
     // Kontextabhängige Felder
-    document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Personalbedarf nur bei Projekten
+    document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Montage-Phasen nur bei Projekten
     document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
-    fCount.value = bar.crew.count || 0;
-    fCrewStart.value = bar.crew.start || bar.start;
-    fCrewEnd.value = bar.crew.end || bar.end;
-    fTrade.value = bar.crew.trade || '';
-    buildAssignList(fTrade.value);
-    const ass = new Set(bar.crew.assigned || []);
-    fAssign.querySelectorAll('input').forEach(cb => { cb.checked = ass.has(cb.value); });
-    phaseDraft = (bar.phases || []).map(p => ({ trade: p.trade, start: p.start, end: p.end, count: p.count || 1 }));
+    // Phasen laden – bestehender Sammelbedarf (crew) wird verlustfrei als erste Phase übernommen
+    if (bar.phases && bar.phases.length) {
+      phaseDraft = bar.phases.map(p => ({ trade: p.trade || 'edelstahl', start: p.start, end: p.end, count: p.count || 1, assigned: (p.assigned || []).slice() }));
+    } else if (bar.crew && (+bar.crew.count > 0)) {
+      phaseDraft = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: (bar.crew.assigned || []).slice() }];
+    } else {
+      phaseDraft = [];
+    }
     renderPhaseList();
     overlay.hidden = false; fLabel.focus();
   }
@@ -651,14 +662,12 @@
       bar.cat = 'vacation';
       delete bar.crew; delete bar.size;
     } else {
+      // Projekt-Fenster: kein eigener Bedarf mehr – alles steckt in den Phasen
       bar.cat = fCat.value;
-      const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
-      let cs = fCrewStart.value || bar.start, ce = fCrewEnd.value || bar.end;
-      if (parse(ce) < parse(cs)) ce = cs;
-      bar.crew = { count: Math.max(0, +fCount.value || 0), start: cs, end: ce, trade: fTrade.value || undefined, assigned };
       bar.phases = phaseDraft.length
-        ? phaseDraft.map(p => ({ trade: p.trade, start: p.start, end: p.end, count: Math.max(1, +p.count || 1) }))
+        ? phaseDraft.map(p => ({ trade: p.trade, start: p.start, end: p.end, count: Math.max(1, +p.count || 1), assigned: (p.assigned || []).slice() }))
         : undefined;
+      delete bar.crew;
     }
     save(); render(); closeEditor();
   };
@@ -1057,22 +1066,28 @@
   }
   function vorplanung() {
     let count = 0;
-    for (const { row, bar } of barsOverlappingWeek()) {
-      const assigned = bar.crew && bar.crew.assigned || [];
-      if (!assigned.length) continue;
-      const name = row.site || row.label;
-      for (let i = 0; i < 7; i++) {
-        const ms = addDays(selMonday, i);
-        if (new Date(ms).getUTCDay() === 0 || new Date(ms).getUTCDay() === 6) continue;
-        if (parse(bar.start) > ms || parse(bar.end) < ms) continue;
-        for (const pid of assigned) {
+    // Trägt je Phase die zugeordneten Monteure an ihren Phasentagen (innerhalb der Woche) ins Raster ein.
+    const place = (assigned, s, e, name) => {
+      for (const pid of (assigned || [])) {
+        for (let i = 0; i < 7; i++) {
+          const ms = addDays(selMonday, i);
+          const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
+          if (parse(s) > ms || parse(e) < ms) continue;
           const key = akey(pid, isoStr(ms));
-          if (!assignments[key]) { assignments[key] = { text: name, type: bar.cat === 'confirmed' ? 'baustelle' : 'baustelle' }; count++; }
+          if (!assignments[key]) { assignments[key] = { text: name, type: 'baustelle' }; count++; }
         }
+      }
+    };
+    for (const { row, bar } of barsOverlappingWeek()) {
+      const name = row.site || row.label;
+      if (bar.phases && bar.phases.length) {
+        for (const ph of bar.phases) place(ph.assigned, ph.start, ph.end, name);
+      } else if (bar.crew) {
+        place(bar.crew.assigned, bar.crew.start || bar.start, bar.crew.end || bar.end, name);
       }
     }
     save(); renderWeek();
-    if (!count) alert('Keine konkret zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan Termine Monteuren zu (Termin anklicken → „Konkret zuordnen"), oder ziehe Baustellen aus der Palette in die Zellen.');
+    if (!count) alert('Keine zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan den Montage-Phasen Monteure zu (Fenster-Balken anklicken → Phase → Monteure), oder ziehe Baustellen aus der Palette in die Zellen.');
   }
   function scrollToToday() {
     const todayIdx = dayIndex(todayMs(), startMs);
