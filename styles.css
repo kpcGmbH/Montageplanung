@@ -231,6 +231,18 @@ html, body {
   font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px;
   background: rgba(255,255,255,.45); color: inherit;
 }
+/* Gewerk-Phasen (dünne Balken unter dem Fenster) */
+.phase-bar {
+  position: absolute; height: 7px; border-radius: 3px;
+  border: 1px solid rgba(0,0,0,.15); cursor: grab;
+  display: flex; align-items: center; padding: 0 3px; overflow: hidden;
+  touch-action: none; user-select: none; box-shadow: 0 1px 1px rgba(0,0,0,.12);
+}
+.phase-bar:hover { filter: brightness(1.05); box-shadow: 0 1px 3px rgba(0,0,0,.28); z-index: 11; }
+.phase-bar.dragging { cursor: grabbing; opacity: .9; z-index: 12; }
+.phase-lbl { font-size: 7.5px; font-weight: 700; color: #fff; line-height: 1; white-space: nowrap; pointer-events: none; text-shadow: 0 0 2px rgba(0,0,0,.4); }
+.phase-bar .h { position: absolute; top: -2px; bottom: -2px; width: 6px; cursor: ew-resize; }
+
 .bar.conflict { outline: 2px solid #d11; outline-offset: 0; }
 .bar.conflict::after {
   content: '⚠'; position: absolute; top: -7px; right: -4px;
@@ -376,6 +388,16 @@ html, body {
 .assign-list input { width: auto; }
 .assign-list .ext { color: #1f97ad; }
 .assign-empty { font-size: 11.5px; color: #b0453b; font-style: italic; }
+
+/* Phasen-Editor */
+.phases { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.phase-row { display: flex; gap: 5px; align-items: center; }
+.phase-row select { flex: 1 1 auto; min-width: 90px; }
+.phase-row input[type="date"] { width: 120px; }
+.phase-row input[type="number"] { width: 46px; }
+.phase-del { color: #c0392b; cursor: pointer; padding: 2px 5px; border-radius: 4px; font-size: 12px; }
+.phase-del:hover { background: #fdecea; }
+#f-phase-add { align-self: flex-start; }
 .dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .dialog-actions .spacer { flex: 1; }
 .btn.danger { color: #c0392b; border-color: #e3b4ad; }

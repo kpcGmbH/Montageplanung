@@ -81,7 +81,7 @@
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
       for (const row of g.rows) for (const bar of row.bars) {
-        if (bar.crew || bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
+        if (bar.crew || (bar.phases && bar.phases.length) || bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
         const x0 = dayIndex(parse(bar.start), startMs), x1 = dayIndex(parse(bar.end), startMs);
         const wd = Math.max(1, workingDaysIn(clamp(x0,0,totalDays-1), clamp(x1,0,totalDays-1)));
         bar.crew = { count: bar.cat === 'preplanning' ? 2 : 1, days: Math.min(wd, 5), assigned: [] };
@@ -164,7 +164,20 @@
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
       for (const r of g.rows) for (const bar of r.bars) {
-        if (!bar.crew || bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
+        if (bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
+        if (bar.phases && bar.phases.length) {
+          // Gewerk-Phasen: jede Phase belegt ihre eigenen Arbeitstage mit ihrer Personenzahl (feste Lage)
+          for (const ph of bar.phases) {
+            const count = +ph.count || 0; if (count <= 0) continue;
+            const x0 = clamp(dayIndex(parse(ph.start), startMs), 0, totalDays-1);
+            const x1 = clamp(dayIndex(parse(ph.end), startMs), 0, totalDays-1);
+            const slots = []; for (let i = x0; i <= x1; i++) if (days[i].work) slots.push(i);
+            if (!slots.length) continue;
+            jobs.push({ bar, count, need: slots.length, slots, slack: 0, x0 });
+          }
+          continue;
+        }
+        if (!bar.crew) continue;
         const count = +bar.crew.count || 0, need = +bar.crew.days || 0;
         if (count <= 0 || need <= 0) continue;
         const x0 = clamp(dayIndex(parse(bar.start), startMs), 0, totalDays-1);
@@ -320,6 +333,23 @@
     return b;
   }
 
+  // Gewerk-Phase: dünner, gewerk-farbiger Balken unter dem Fensterbalken (ziehbar; Klick öffnet den Fenster-Editor)
+  function makePhaseBar(row, windowBar, ph, laneIdx) {
+    const t = TRADES()[ph.trade] || { color: '#9aa0a6', label: ph.trade || 'Gewerk', short: '?' };
+    const x0 = dayIndex(parse(ph.start), startMs), x1 = dayIndex(parse(ph.end), startMs);
+    const b = el('div', 'phase-bar');
+    b.style.left = (x0 * dayWidth) + 'px';
+    b.style.width = Math.max((x1 - x0 + 1) * dayWidth - 2, dayWidth - 2) + 'px';
+    b.style.top = (22 + laneIdx * 8) + 'px';
+    b.style.background = t.color; b.style.borderColor = t.color;
+    b.appendChild(el('span', 'phase-lbl', (ph.count > 1 ? ph.count + '× ' : '') + t.short));
+    b.appendChild(el('div', 'h h-l')); b.appendChild(el('div', 'h h-r'));
+    b.title = `${t.label}${ph.count ? ' · ' + ph.count + ' Pers.' : ''}\n${fmt(parse(ph.start))} – ${fmt(parse(ph.end))}`;
+    b._row = row; b._bar = ph;
+    attachDrag(b, { onClick: () => openEditor(row, windowBar, false) });
+    return b;
+  }
+
   function buildBody(flags) {
     const body = el('div', 'body');
     const trackW = totalDays * dayWidth;
@@ -365,9 +395,13 @@
         row.bars.push(bar);
         openEditor(row, bar, true);
       });
+      // Zusätzliche Höhe für Gewerk-Phasen-Lanes unter dem Fensterbalken
+      const lanes = Math.max(0, ...row.bars.map(b => (b.phases ? b.phases.length : 0)));
+      if (lanes > 0) r.style.height = (24 + lanes * 8) + 'px';
       for (const bar of row.bars) {
         if (hiddenCats.has(effCat(row, bar))) continue;
         track.appendChild(makeBar(row, bar, flags));
+        (bar.phases || []).forEach((ph, li) => track.appendChild(makePhaseBar(row, bar, ph, li)));
       }
       r.appendChild(label); r.appendChild(track);
       return r;
@@ -451,7 +485,8 @@
   }
 
   // ---- Ziehen / Größe ändern ----
-  function attachDrag(b) {
+  function attachDrag(b, opts) {
+    opts = opts || {};
     b.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
@@ -477,7 +512,7 @@
         b.removeEventListener('pointermove', onMove);
         b.removeEventListener('pointerup', onUp);
         b.classList.remove('dragging');
-        if (!moved && mode === 'move') { openEditor(b._row, bar, false); return; }
+        if (!moved && mode === 'move') { (opts.onClick ? opts.onClick() : openEditor(b._row, bar, false)); return; }
         if (nx0 !== ox0 || nx1 !== ox1) {
           bar.start = isoStr(addDays(startMs, nx0));
           bar.end = isoStr(addDays(startMs, nx1));
@@ -533,6 +568,33 @@
     fAssign.querySelectorAll('input').forEach(cb => { cb.checked = checked.has(cb.value); });
   });
 
+  // Gewerk-Phasen (Arbeitskopie während der Dialog offen ist)
+  const fPhases = document.getElementById('f-phases');
+  let phaseDraft = [];
+  function renderPhaseList() {
+    fPhases.innerHTML = '';
+    phaseDraft.forEach((ph, i) => {
+      const rowEl = el('div', 'phase-row');
+      const sel = document.createElement('select');
+      for (const k of Object.keys(TRADES())) { const o = el('option', null, TRADES()[k].label); o.value = k; sel.appendChild(o); }
+      sel.value = ph.trade; sel.onchange = () => { ph.trade = sel.value; };
+      const von = document.createElement('input'); von.type = 'date'; von.value = ph.start;
+      von.onchange = () => { ph.start = von.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
+      const bis = document.createElement('input'); bis.type = 'date'; bis.value = ph.end;
+      bis.onchange = () => { ph.end = bis.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
+      const cnt = document.createElement('input'); cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.value = ph.count || 1; cnt.title = 'Anzahl Personen';
+      cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
+      const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
+      rowEl.appendChild(sel); rowEl.appendChild(von); rowEl.appendChild(bis); rowEl.appendChild(cnt); rowEl.appendChild(del);
+      fPhases.appendChild(rowEl);
+    });
+  }
+  document.getElementById('f-phase-add').onclick = () => {
+    const b = current && current.bar;
+    phaseDraft.push({ trade: 'edelstahl', start: (b && b.start) || fStart.value, end: (b && b.end) || fEnd.value, count: 1 });
+    renderPhaseList();
+  };
+
   function openEditor(row, bar, isNew) {
     current = { row, bar, isNew };
     const isExtern = row.capRole === 'extern';
@@ -553,6 +615,8 @@
     buildAssignList(fTrade.value);
     const ass = new Set(bar.crew.assigned || []);
     fAssign.querySelectorAll('input').forEach(cb => { cb.checked = ass.has(cb.value); });
+    phaseDraft = (bar.phases || []).map(p => ({ trade: p.trade, start: p.start, end: p.end, count: p.count || 1 }));
+    renderPhaseList();
     overlay.hidden = false; fLabel.focus();
   }
   function closeEditor() { overlay.hidden = true; current = null; }
@@ -577,6 +641,9 @@
       bar.cat = fCat.value;
       const assigned = Array.from(fAssign.querySelectorAll('input:checked')).map(cb => cb.value);
       bar.crew = { count: Math.max(0, +fCount.value || 0), days: Math.max(0, +fDays.value || 0), trade: fTrade.value || undefined, assigned };
+      bar.phases = phaseDraft.length
+        ? phaseDraft.map(p => ({ trade: p.trade, start: p.start, end: p.end, count: Math.max(1, +p.count || 1) }))
+        : undefined;
     }
     save(); render(); closeEditor();
   };
