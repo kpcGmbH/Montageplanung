@@ -137,11 +137,12 @@
     // Verfügbarkeit je Monteur aus der Liste: interner Urlaub −1, externe Buchung +Truppstärke
     for (const m of PLAN.team) {
       const extern = m.type === 'extern';
+      const def = +m.size || 1; // Standard-Truppstärke des externen Monteurs
       for (const bar of (m.bars || [])) {
         if (bar.cat !== 'vacation') continue;
         const x0 = clamp(dayIndex(parse(bar.start), startMs), 0, totalDays-1);
         const x1 = clamp(dayIndex(parse(bar.end), startMs), 0, totalDays-1);
-        const delta = extern ? (+bar.size || 1) : -1;
+        const delta = extern ? (+bar.size || def) : -1;
         for (let i = x0; i <= x1; i++) if (days[i].work) cap[i] = Math.max(0, cap[i] + delta);
       }
     }
@@ -288,8 +289,8 @@
     b.appendChild(el('span', 'lbl', bar.label || ''));
     if (bar.crew && bar.crew.count > 0 && bar.crew.days > 0)
       b.appendChild(el('span', 'badge', `${bar.crew.count}×${bar.crew.days}T`));
-    if (row.capRole === 'extern' && bar.size >= 1)
-      b.appendChild(el('span', 'badge', `${bar.size} P`));
+    if (row.capRole === 'extern')
+      b.appendChild(el('span', 'badge', `${(+bar.size || (row._member && +row._member.size) || 1)} P`));
     b.appendChild(el('div', 'h h-l'));
     b.appendChild(el('div', 'h h-r'));
     const crewTxt = bar.crew && bar.crew.count
@@ -341,8 +342,8 @@
         const day = clamp(Math.floor(e.offsetX / dayWidth), 0, totalDays - 1);
         const ms = addDays(startMs, day);
         const s = isoStr(ms);
-        const bar = row.capRole === 'extern' ? { start: s, end: s, label: '', cat: 'vacation', size: 1 }
-          : row.capRole === 'monteur' ? { start: s, end: s, label: '', cat: 'vacation' }
+        const bar = (row.capRole === 'extern' || row.capRole === 'monteur')
+          ? { start: s, end: s, label: '', cat: 'vacation' }   // extern erbt Standard-Truppstärke des Monteurs
           : { start: s, end: s, label: '', cat: 'preplanning', crew: { count: 1, days: 1, assigned: [] } };
         row.bars.push(bar);
         openEditor(row, bar, true);
@@ -513,7 +514,7 @@
     // Kontextabhängige Felder
     document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Personalbedarf nur bei Projekten
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
-    document.getElementById('f-size').value = bar.size || 1;
+    document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     fCount.value = bar.crew.count || 0;
     fDays.value = bar.crew.days || 0;
     buildAssignList();
@@ -532,7 +533,9 @@
     if (parse(e) < parse(s)) e = s;
     bar.start = s; bar.end = e;
     if (row.capRole === 'extern') {
-      bar.size = Math.max(1, +document.getElementById('f-size').value || 1);
+      const val = Math.max(1, +document.getElementById('f-size').value || 1);
+      const def = (row._member && +row._member.size) || 1;
+      if (val === def) delete bar.size; else bar.size = val;  // = Standard → erben; sonst überschreiben
       delete bar.crew;
     } else if (row.capRole === 'monteur') {
       delete bar.crew; delete bar.size;
@@ -640,14 +643,26 @@
         const o = el('option', null, t); o.value = v; sel.appendChild(o);
       });
       sel.value = m.type;
-      sel.addEventListener('change', () => { m.type = sel.value; save(); render(); refreshCapInfo(); });
+      // Standard-Truppstärke – nur bei Externen
+      const sizeWrap = el('label', 'm-size', 'Trupp ');
+      sizeWrap.title = 'Standard-Truppstärke (Personen je Buchung) – nur extern';
+      const sizeInp = document.createElement('input'); sizeInp.type = 'number'; sizeInp.min = '1'; sizeInp.step = '1'; sizeInp.value = m.size || 1;
+      sizeInp.addEventListener('input', () => { m.size = Math.max(1, +sizeInp.value || 1); save(); render(); });
+      sizeWrap.appendChild(sizeInp);
+      sizeWrap.style.display = m.type === 'extern' ? '' : 'none';
+      sel.addEventListener('change', () => {
+        m.type = sel.value;
+        if (m.type === 'extern' && !m.size) m.size = 1;
+        sizeWrap.style.display = m.type === 'extern' ? '' : 'none';
+        save(); render(); refreshCapInfo();
+      });
       const del = el('span', 'm-del', '✕'); del.title = 'Monteur entfernen';
       del.onclick = () => {
         if (!confirm(`„${m.name}" wirklich entfernen?`)) return;
         PLAN.team.splice(PLAN.team.indexOf(m), 1);
         save(); render(); renderTeamList();
       };
-      row1.appendChild(name); row1.appendChild(sel); row1.appendChild(del);
+      row1.appendChild(name); row1.appendChild(sel); row1.appendChild(sizeWrap); row1.appendChild(del);
 
       const chips = el('div', 'm-trades');
       for (const key of Object.keys(TRADES())) {
