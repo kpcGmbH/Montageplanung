@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <div class="app">
@@ -24,6 +24,9 @@
       <button id="addResource" class="btn" title="Ressourcen-Zeile anlegen (Urlaub, externe Trupps)">+ Ressource</button>
       <button id="addBauleiter" class="btn" title="Bauleiter anlegen (ohne Kapazitätswirkung)">+ Bauleiter</button>
       <button id="today" class="btn timeline-only">Heute</button>
+      <button id="exportBtn" class="btn" title="Aktuellen Plan als JSON-Datei sichern">Export</button>
+      <button id="importBtn" class="btn" title="Plan aus JSON-Datei laden">Import</button>
+      <input id="importFile" type="file" accept="application/json,.json" hidden>
       <button id="reset" class="btn" title="Beispieldaten wiederherstellen">Zurücksetzen</button>
       <div class="spacer"></div>
       <span id="cloudStatus" class="cloud-status off" title="Cloud-Status (Microsoft/SharePoint)">offline (lokal)</span>
@@ -161,8 +164,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=2"></script>
-  <script src="cloud.js?v=2"></script>
-  <script src="app.js?v=2"></script>
+  <script src="data.js?v=3"></script>
+  <script src="cloud.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

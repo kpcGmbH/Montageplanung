@@ -11,3 +11,6 @@ Montageplanung/
 .DS_Store
 __pycache__/
 *.pyc
+
+# Einmalige Import-Datei (nicht ins Repo)
+import_montageplanung.json

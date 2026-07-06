@@ -890,6 +890,37 @@
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
     location.reload();
   };
+  // Export: aktuellen Plan als JSON sichern
+  document.getElementById('exportBtn').onclick = () => {
+    const blob = new Blob([JSON.stringify(snapshot(), null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'montageplanung-export.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  // Import: Plan aus JSON-Datei laden (und – falls angemeldet – in die Cloud schreiben)
+  const importFile = document.getElementById('importFile');
+  document.getElementById('importBtn').onclick = () => importFile.click();
+  importFile.onchange = () => {
+    const f = importFile.files && importFile.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      let data;
+      try { data = JSON.parse(rd.result); } catch (e) { alert('Das ist keine gültige JSON-Datei.'); importFile.value = ''; return; }
+      if (!data || !Array.isArray(data.groups)) { alert('Die Datei enthält keine Plandaten ("groups").'); importFile.value = ''; return; }
+      const rowN = data.groups.reduce((n, g) => n + (g.rows ? g.rows.length : 0), 0);
+      const cloudNote = (window.Cloud && Cloud.isReady())
+        ? '\n\n⚠ Du bist angemeldet: Der importierte Stand ersetzt danach auch die gemeinsamen Daten in SharePoint.'
+        : '';
+      if (!confirm(`Plan aus "${f.name}" importieren?\n${rowN} Zeilen werden geladen und ERSETZEN den aktuellen Plan.${cloudNote}\n\nTipp: vorher „Export" für ein Backup.`)) { importFile.value = ''; return; }
+      applySnapshot(data); seedCrew(); save(); buildLegend(); render();
+      importFile.value = '';
+      alert('Import fertig – ' + rowN + ' Zeilen geladen.');
+    };
+    rd.readAsText(f);
+  };
   document.getElementById('search').oninput = (e) => { filter = e.target.value.trim().toLowerCase(); render(); };
 
   const legend = document.getElementById('legend');
