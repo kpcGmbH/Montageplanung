@@ -121,7 +121,12 @@ window.Cloud = (function () {
         msalAccount = r.account; msalApp.setActiveAccount(msalAccount);
         setStatus('angemeldet: ' + (msalAccount.username || ''), 'ok');
         await pull();
-      } catch (e) { setStatus('Login-Fehler: ' + (e.message || e), 'warn'); }
+      } catch (e) {
+        console.error('Login-Fehler:', e);
+        const code = e && (e.errorCode || e.errorNo);
+        const msg = (e && (e.errorMessage || e.message)) || String(e);
+        setStatus('Login-Fehler: ' + (code ? code + ' – ' : '') + msg, 'warn');
+      }
     },
     async logout() {
       if (msalApp && msalAccount) { try { await msalApp.logoutPopup({ account: msalAccount }); } catch (e) {} }

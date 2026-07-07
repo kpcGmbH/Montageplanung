@@ -1332,11 +1332,18 @@
   const cloudLoginBtn = document.getElementById('cloudLogin');
   const cloudReloadBtn = document.getElementById('cloudReload');
   const loginNotice = document.getElementById('loginNotice');
+  const loginNoticeErr = document.getElementById('loginNoticeErr');
   function updateCloudUI(text, cls) {
     if (cloudStatusEl) { cloudStatusEl.textContent = text; cloudStatusEl.className = 'cloud-status ' + (cls || ''); }
     const ready = !!(window.Cloud && Cloud.isReady());
     if (cloudLoginBtn) cloudLoginBtn.textContent = ready ? 'Abmelden' : 'Anmelden';
     if (loginNotice) loginNotice.hidden = ready;   // nur zeigen, solange nicht angemeldet
+    // Fehler (z. B. fehlender Admin-Consent) direkt im Banner sichtbar machen – nicht nur im kleinen Status oben rechts
+    if (loginNoticeErr) {
+      const isErr = cls === 'warn' && !ready;
+      loginNoticeErr.hidden = !isErr;
+      loginNoticeErr.textContent = isErr ? '✕ ' + text + ' — bitte diesen Text an die IT / Johannes weitergeben.' : '';
+    }
   }
   if (cloudLoginBtn) cloudLoginBtn.onclick = () => { if (window.Cloud) (Cloud.isReady() ? Cloud.logout() : Cloud.login()); };
   const loginNoticeBtn = document.getElementById('loginNoticeBtn');

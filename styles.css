@@ -264,6 +264,12 @@ html, body {
 .login-notice[hidden] { display: none; }
 .login-notice .btn { background: var(--copper); border-color: var(--copper-dark); color: #fff; }
 .login-notice .btn:hover { background: var(--copper-dark); }
+.login-err {
+  flex-basis: 100%; margin-top: 2px; padding: 6px 9px;
+  font-size: 12px; color: #7a1712; background: #fbe3e0;
+  border: 1px solid #e2a49e; border-radius: 4px; word-break: break-word;
+}
+.login-err[hidden] { display: none; }
 
 /* Hinweiszeile */
 .hint {
