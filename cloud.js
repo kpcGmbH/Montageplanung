@@ -117,7 +117,21 @@ window.Cloud = (function () {
       try {
         if (!msalApp) await msalInit();
         if (USE_REDIRECT) { await msalApp.loginRedirect({ scopes: GRAPH_SCOPES }); return; }
-        const r = await msalApp.loginPopup({ scopes: GRAPH_SCOPES, prompt: 'select_account' });
+        let r;
+        try {
+          r = await msalApp.loginPopup({ scopes: GRAPH_SCOPES, prompt: 'select_account' });
+        } catch (popupErr) {
+          // Läuft die App selbst in einem Popup-/App-Fenster (z. B. aus Teams/Outlook geöffnet),
+          // verbietet MSAL verschachtelte Popups → auf Weiterleitung ausweichen. Gleiches gilt,
+          // wenn der Browser das Popup blockiert.
+          const code = popupErr && popupErr.errorCode;
+          if (['block_nested_popups', 'popup_window_error', 'empty_window_error'].indexOf(code) >= 0) {
+            setStatus('Anmeldung wird weitergeleitet…', 'sync');
+            await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
+            return;
+          }
+          throw popupErr;
+        }
         msalAccount = r.account; msalApp.setActiveAccount(msalAccount);
         setStatus('angemeldet: ' + (msalAccount.username || ''), 'ok');
         await pull();
