@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
 </head>
 <body>
   <div class="app">
@@ -29,6 +29,10 @@
       <button id="cloudReload" class="btn" title="Geteilten Stand neu laden">↻ Laden</button>
       <button id="cloudLogin" class="btn">Anmelden</button>
       <div id="legend" class="legend timeline-only"></div>
+    </div>
+    <div class="login-notice" id="loginNotice" hidden>
+      <span>⚠ <b>Nicht angemeldet</b> – du siehst nur lokale Demodaten. Bitte anmelden, um den gemeinsamen Plan (SharePoint) zu sehen.</span>
+      <button id="loginNoticeBtn" class="btn">Anmelden</button>
     </div>
     <div class="hint" id="hint">Doppelklick auf eine leere Zeile = neuer Termin &nbsp;·&nbsp; Balken ziehen = verschieben &nbsp;·&nbsp; Ränder ziehen = Dauer ändern &nbsp;·&nbsp; Klick = bearbeiten</div>
     <div class="weekbar" id="weekbar" hidden>
@@ -173,8 +177,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=20"></script>
-  <script src="cloud.js?v=20"></script>
-  <script src="app.js?v=20"></script>
+  <script src="data.js?v=21"></script>
+  <script src="cloud.js?v=21"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

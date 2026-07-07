@@ -1188,11 +1188,16 @@
   const cloudStatusEl = document.getElementById('cloudStatus');
   const cloudLoginBtn = document.getElementById('cloudLogin');
   const cloudReloadBtn = document.getElementById('cloudReload');
+  const loginNotice = document.getElementById('loginNotice');
   function updateCloudUI(text, cls) {
     if (cloudStatusEl) { cloudStatusEl.textContent = text; cloudStatusEl.className = 'cloud-status ' + (cls || ''); }
-    if (cloudLoginBtn) cloudLoginBtn.textContent = (window.Cloud && Cloud.isReady()) ? 'Abmelden' : 'Anmelden';
+    const ready = !!(window.Cloud && Cloud.isReady());
+    if (cloudLoginBtn) cloudLoginBtn.textContent = ready ? 'Abmelden' : 'Anmelden';
+    if (loginNotice) loginNotice.hidden = ready;   // nur zeigen, solange nicht angemeldet
   }
   if (cloudLoginBtn) cloudLoginBtn.onclick = () => { if (window.Cloud) (Cloud.isReady() ? Cloud.logout() : Cloud.login()); };
+  const loginNoticeBtn = document.getElementById('loginNoticeBtn');
+  if (loginNoticeBtn) loginNoticeBtn.onclick = () => { if (window.Cloud) Cloud.login(); };
   if (cloudReloadBtn) cloudReloadBtn.onclick = () => { if (window.Cloud) Cloud.reload(); };
 
   load();
