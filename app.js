@@ -1111,6 +1111,62 @@
     return map;
   }
 
+  // Offener Bedarf: je Projekt-Phase und Werktag, wie viele Monteure des Gewerks gefordert (count)
+  // aber noch NICHT zugeordnet sind. Basis für die Sektion „Offener Bedarf" in der Woche.
+  function weekOpenDemand() {
+    const wdays = weekDates(), out = [];
+    for (const row of projRows()) {
+      const name = row.site || row.label;
+      for (const bar of row.bars) {
+        const eff = (bar.phases && bar.phases.length) ? bar.phases
+          : (bar.crew ? [{ trade: bar.crew.trade, start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: bar.crew.count, assigned: bar.crew.assigned }] : []);
+        eff.forEach((ph, idx) => {
+          const need = +ph.count || 0; if (need <= 0) return;
+          const ranges = assignedRanges(ph), days = {}; let anyOpen = false;
+          for (let i = 0; i < 7; i++) {
+            const ms = wdays[i]; const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
+            if (parse(ph.start) > ms || parse(ph.end) < ms) continue;   // Phase an dem Tag nicht aktiv
+            const have = new Set(ranges.filter(r => parse(r.start) <= ms && parse(r.end) >= ms).map(r => r.id)).size;
+            const open = need - have;
+            if (open > 0) { days[isoStr(ms)] = open; anyOpen = true; }
+          }
+          if (anyOpen) out.push({ name, trade: ph.trade || '', row, bar, idx, days });
+        });
+      }
+    }
+    return out;
+  }
+
+  // Kleines Auswahlmenü, um einen offenen Bedarf direkt in der Woche taggenau zu besetzen.
+  let needMenu = null;
+  function closeNeedMenu() { if (needMenu) { needMenu.remove(); needMenu = null; document.removeEventListener('mousedown', onNeedDocDown, true); } }
+  function onNeedDocDown(e) { if (needMenu && !needMenu.contains(e.target)) closeNeedMenu(); }
+  function openNeedPicker(cell, row, bar, idx, dISO, trade) {
+    closeNeedMenu();
+    const ph = phasesOf(bar)[idx]; if (!ph) return;
+    const t = TRADES()[trade] || { label: '(Gewerk offen)' };
+    const ms = parse(dISO);
+    needMenu = el('div', 'need-menu');
+    needMenu.appendChild(el('div', 'need-menu-head', t.label + ' · ' + WDAYS[(new Date(ms).getUTCDay() + 6) % 7] + ' ' + fmt(ms).slice(0, 6) + ' · ' + (row.site || row.label)));
+    const cands = PLAN.team.filter(m => (!trade || qualifies(m, trade)) && (m.type !== 'extern' || bookedThisWeek(m)));
+    if (!cands.length) needMenu.appendChild(el('div', 'need-menu-empty', 'Kein qualifizierter Monteur verfügbar'));
+    const der = weekDerived();
+    for (const m of cands) {
+      const stt = der[akey(m.id, dISO)] || { projects: [], urlaub: false };
+      const busy = stt.urlaub ? 'Urlaub' : (stt.projects.length ? stt.projects.join(', ') : '');
+      const b = el('button', 'need-menu-item' + (busy ? ' busy' : ''));
+      b.appendChild(el('span', null, m.name + (m.type === 'extern' ? ' (ext)' : '')));
+      if (busy) b.appendChild(el('span', 'need-menu-busy', busy));
+      b.onclick = () => { addToPhase(ph, m.id, dISO); save(); closeNeedMenu(); renderWeek(); };
+      needMenu.appendChild(b);
+    }
+    document.body.appendChild(needMenu);
+    const r = cell.getBoundingClientRect();
+    needMenu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - needMenu.offsetWidth - 8)) + 'px';
+    needMenu.style.top = (r.bottom + 4) + 'px';
+    setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
+  }
+
   function renderWeek() {
     const sl = 0, st = viewport.scrollTop;
     const dates = weekDates();
@@ -1135,6 +1191,33 @@
     });
 
     const derived = weekDerived();
+
+    // Sektion „Offener Bedarf" – Gewerke, die im Zeitplan gefordert, aber noch nicht besetzt sind
+    const needs = weekOpenDemand();
+    if (needs.length) {
+      grid.appendChild(el('div', 'wk-sep wk-sep-need', 'Offener Bedarf – noch niemand zugeordnet'));
+      for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill wk-sep-need'));
+      for (const nd of needs) {
+        const t = TRADES()[nd.trade] || { label: '(Gewerk offen)', short: '', color: '#999' };
+        const nameCell = el('div', 'wk-name wk-need-name');
+        const dot = el('span', 'need-dot'); dot.style.background = t.color; nameCell.appendChild(dot);
+        nameCell.appendChild(document.createTextNode(nd.name + ' · ' + t.label));
+        nameCell.title = nd.name + ' · ' + t.label;
+        grid.appendChild(nameCell);
+        dates.forEach((ms, i) => {
+          const dISO = isoStr(ms), open = nd.days[dISO] || 0;
+          const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (open ? ' wk-need' : ''));
+          if (open) {
+            cell.textContent = open + '×' + (t.short ? ' ' + t.short : '');
+            cell.style.setProperty('--need-col', t.color);
+            cell.title = t.label + ' – ' + open + ' Monteur' + (open > 1 ? 'e' : '') + ' offen (' + nd.name + ') · klicken zum Zuordnen';
+            cell.addEventListener('click', () => openNeedPicker(cell, nd.row, nd.bar, nd.idx, dISO, nd.trade));
+          }
+          grid.appendChild(cell);
+        });
+      }
+    }
+
     let lastKind = null;
     for (const p of weekPeople()) {
       if (p.kind === 'bauleiter' && lastKind !== 'bauleiter') {

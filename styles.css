@@ -338,6 +338,31 @@ html, body {
   border-right: 2px solid var(--line-strong);
 }
 .wk-sep-fill { background: #eef0f3; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+/* Sektion „Offener Bedarf" */
+.wk-sep.wk-sep-need, .wk-sep-fill.wk-sep-need { background: #f3ecdd; color: #7a5300; }
+.wk-name.wk-need-name { font-size: 11px; color: #4a4f54; display: flex; align-items: center; gap: 6px; }
+.need-dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; display: inline-block; }
+.wk-cell.wk-need {
+  font-weight: 700; font-size: 11px; color: var(--need-col, #895612);
+  background: repeating-linear-gradient(-45deg, #fff, #fff 5px, color-mix(in srgb, var(--need-col, #895612) 16%, #fff) 5px, color-mix(in srgb, var(--need-col, #895612) 16%, #fff) 10px);
+  border: 1.5px dashed var(--need-col, #895612); outline-offset: -1.5px; cursor: pointer;
+}
+.wk-cell.wk-need:hover { filter: brightness(0.97); outline: 1px solid var(--need-col, #895612); }
+/* Auswahlmenü für offenen Bedarf */
+.need-menu {
+  position: fixed; z-index: 200; min-width: 200px; max-width: 320px;
+  background: #fff; border: 1px solid var(--line-strong); border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(20,24,28,.22); padding: 4px; font-size: 12.5px;
+}
+.need-menu-head { padding: 6px 8px; font-weight: 700; color: #895612; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.need-menu-empty { padding: 8px; color: #888; }
+.need-menu-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
+  text-align: left; padding: 6px 8px; border: 0; background: transparent; border-radius: 4px; cursor: pointer; font: inherit;
+}
+.need-menu-item:hover { background: #f2ede3; }
+.need-menu-item.busy { color: #b0552e; }
+.need-menu-busy { font-size: 10.5px; color: #c0271c; white-space: nowrap; }
 
 /* Zell-/Chip-Farben nach Typ */
 .t-baustelle { background: #e6f0fb; }
