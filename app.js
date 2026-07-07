@@ -205,7 +205,7 @@
     const add = (id, s, e, bar) => { (byMonteur[id] = byMonteur[id] || []).push({ x0: dayIndex(parse(s), startMs), x1: dayIndex(parse(e), startMs), bar }); };
     for (const g of PLAN.groups) for (const r of g.rows) for (const bar of r.bars) {
       if (bar.phases && bar.phases.length) {
-        for (const ph of bar.phases) for (const id of (ph.assigned || [])) add(id, ph.start, ph.end, bar);
+        for (const ph of bar.phases) for (const rg of assignedRanges(ph)) add(rg.id, rg.start, rg.end, bar);
       } else if (bar.crew) {
         for (const id of (bar.crew.assigned || [])) add(id, bar.crew.start || bar.start, bar.crew.end || bar.end, bar);
       }
@@ -289,6 +289,71 @@
     if (t.includes(tradeKey)) return true;
     if (tradeKey === 'sanitaer_klein' && t.includes('sanitaer')) return true;
     return false;
+  }
+  // Phasen-Zuordnung pro Person als Bereich (unterstützt Alt-Format String-ID = ganze Phase
+  // sowie neues Format {id,start,end} = taggenauer Teilbereich, für Verschieben in der Woche).
+  const idOf = (a) => (typeof a === 'string' ? a : (a && a.id));
+  const assignedRanges = (ph) => (ph.assigned || []).map(a => (typeof a === 'string' ? { id: a, start: ph.start, end: ph.end } : { id: a.id, start: a.start, end: a.end }));
+  // Entfernt einen einzelnen Tag aus einem Bereich → 0–2 Teilbereiche
+  function splitRange(id, s, e, dayISO) {
+    const D = parse(dayISO), out = [];
+    if (parse(s) < D) out.push({ id, start: s, end: isoStr(addDays(D, -1)) });
+    if (parse(e) > D) out.push({ id, start: isoStr(addDays(D, 1)), end: e });
+    return out;
+  }
+  // Wandelt einen alten Sammelbedarf (crew) verlustfrei in eine Phase um – Voraussetzung fürs taggenaue Bearbeiten.
+  function phasesOf(bar) {
+    if (bar.phases && bar.phases.length) return bar.phases;
+    if (bar.crew) {
+      bar.phases = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: (bar.crew.assigned || []).slice() }];
+      delete bar.crew; return bar.phases;
+    }
+    return [];
+  }
+  // Entfernt Person an genau EINEM Tag aus einer Phase (splittet den Bereich bei Bedarf).
+  function removeFromPhase(ph, id, dayISO) {
+    const D = parse(dayISO), next = [];
+    for (const a of (ph.assigned || [])) {
+      const r = (typeof a === 'string') ? { id: a, start: ph.start, end: ph.end } : { id: a.id, start: a.start, end: a.end };
+      if (r.id !== id || parse(r.start) > D || parse(r.end) < D) { next.push(a); continue; }
+      for (const seg of splitRange(r.id, r.start, r.end, dayISO)) next.push(seg);
+    }
+    ph.assigned = next;
+  }
+  // Fügt Person an genau EINEM Tag zu einer Phase hinzu (als taggenauer Bereich).
+  function addToPhase(ph, id, dayISO) {
+    ph.assigned = ph.assigned || [];
+    const D = parse(dayISO);
+    const covered = assignedRanges(ph).some(r => r.id === id && parse(r.start) <= D && parse(r.end) >= D);
+    if (!covered) ph.assigned.push({ id, start: dayISO, end: dayISO });
+    // count (geplante Truppstärke) bleibt unverändert – ein Tages-Handoff erhöht den Bedarf nicht
+  }
+  const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows : []; };
+  // Verschiebt einen Tages-Einsatz von (fromId, fromDate) auf (toId, toDate) und schreibt es in den Zeitplan zurück.
+  function weekReassign(fromId, fromDate, toId, toDate, projectNames) {
+    if (fromId === toId && fromDate === toDate) return;
+    const names = projectNames || [], D = parse(fromDate);
+    for (const row of projRows()) {
+      const nm = row.site || row.label;
+      if (names.length && names.indexOf(nm) < 0) continue;
+      for (const bar of row.bars) for (const ph of phasesOf(bar)) {
+        const here = assignedRanges(ph).some(r => r.id === fromId && parse(r.start) <= D && parse(r.end) >= D);
+        if (!here) continue;
+        removeFromPhase(ph, fromId, fromDate);
+        addToPhase(ph, toId, toDate);
+      }
+    }
+    save();
+  }
+  // Entfernt Person an genau einem Tag aus allen (genannten) Projekten.
+  function removePersonDay(pid, dayISO, projectNames) {
+    const names = projectNames || [];
+    for (const row of projRows()) {
+      const nm = row.site || row.label;
+      if (names.length && names.indexOf(nm) < 0) continue;
+      for (const bar of row.bars) for (const ph of phasesOf(bar)) removeFromPhase(ph, pid, dayISO);
+    }
+    save();
   }
   function tradeTags(trades) {
     const wrap = el('span', 'trade-tags');
@@ -587,12 +652,12 @@
           if (ph.trade && !qualifies(m, ph.trade)) continue;
           any = true;
           const lab = el('label', null);
-          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = m.id; cb.checked = (ph.assigned || []).includes(m.id);
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = m.id; cb.checked = (ph.assigned || []).some(a => idOf(a) === m.id);
           cb.onchange = () => {
-            ph.assigned = ph.assigned || [];
-            if (cb.checked) { if (!ph.assigned.includes(m.id)) ph.assigned.push(m.id); }
-            else ph.assigned = ph.assigned.filter(x => x !== m.id);
-            if (ph.assigned.length > (+ph.count || 0)) { ph.count = ph.assigned.length; cnt.value = ph.count; }
+            ph.assigned = (ph.assigned || []).filter(a => idOf(a) !== m.id);  // vorhandene (Teil-)Bereiche der Person entfernen
+            if (cb.checked) ph.assigned.push(m.id);                            // anhaken = ganze Phase
+            const n = new Set(ph.assigned.map(idOf)).size;
+            if (n > (+ph.count || 0)) { ph.count = n; cnt.value = ph.count; }
           };
           const span = el('span', m.type === 'extern' ? 'ext' : null, m.name + (m.type === 'extern' ? ' (ext)' : ''));
           lab.appendChild(cb); lab.appendChild(span); lab.appendChild(tradeTags(m.trades));
@@ -602,7 +667,7 @@
       };
       sel.onchange = () => {
         ph.trade = sel.value;
-        ph.assigned = (ph.assigned || []).filter(id => { const m = PLAN.team.find(t => t.id === id); return m && qualifies(m, ph.trade); });
+        ph.assigned = (ph.assigned || []).filter(a => { const m = PLAN.team.find(t => t.id === idOf(a)); return m && qualifies(m, ph.trade); });
         buildAsg();
       };
       buildAsg();
@@ -640,10 +705,11 @@
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     // Phasen laden – bestehender Sammelbedarf (crew) wird verlustfrei als erste Phase übernommen
+    const cloneAssigned = (arr) => (arr || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: a.start, end: a.end }));
     if (bar.phases && bar.phases.length) {
-      phaseDraft = bar.phases.map(p => ({ trade: p.trade || 'edelstahl', start: p.start, end: p.end, count: p.count || 1, assigned: (p.assigned || []).slice() }));
+      phaseDraft = bar.phases.map(p => ({ trade: p.trade || 'edelstahl', start: p.start, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned) }));
     } else if (bar.crew && (+bar.crew.count > 0)) {
-      phaseDraft = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: (bar.crew.assigned || []).slice() }];
+      phaseDraft = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: cloneAssigned(bar.crew.assigned) }];
     } else {
       phaseDraft = [];
     }
@@ -672,7 +738,17 @@
       // Projekt-Fenster: kein eigener Bedarf mehr – alles steckt in den Phasen
       bar.cat = fCat.value;
       bar.phases = phaseDraft.length
-        ? phaseDraft.map(p => ({ trade: p.trade, start: p.start, end: p.end, count: Math.max(1, +p.count || 1), assigned: (p.assigned || []).slice() }))
+        ? phaseDraft.map(p => {
+            const s = p.start, e = p.end;
+            const asg = (p.assigned || []).map(a => {
+              if (typeof a === 'string') return a;                         // ganze Phase
+              // Teilbereich auf das (evtl. geänderte) Phasenfenster begrenzen
+              let rs = a.start > s ? a.start : s, re = a.end < e ? a.end : e;
+              if (rs > re) return null;
+              return (rs === s && re === e) ? a.id : { id: a.id, start: rs, end: re };
+            }).filter(Boolean);
+            return { trade: p.trade, start: s, end: e, count: Math.max(1, +p.count || 1), assigned: asg };
+          })
         : undefined;
       delete bar.crew;
     }
@@ -1027,8 +1103,8 @@
       for (const bar of row.bars) {
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
-        for (const ph of phases) for (const id of (ph.assigned || [])) {
-          eachWorkday(ph.start, ph.end, (ms) => { const c = get(id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); });
+        for (const ph of phases) for (const r of assignedRanges(ph)) {
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); });
         }
       }
     }
@@ -1091,13 +1167,21 @@
         cell.dataset.key = key;
         if (text) cell.textContent = text;
         if (title) cell.title = title;
-        // Manuelle Zusätze (Büro/n.v. …) per Palette-Drop bzw. Klick; Baustellen kommen aus dem Zeitplan
+        // Baustellen-Einsatz (aus dem Zeitplan) lässt sich taggenau auf eine andere Person/einen anderen Tag ziehen
+        if (proj.length && !note && !der.urlaub) {
+          cell.draggable = true;
+          const pj = proj.slice(), fd = dISO, fid = p.id;
+          cell.addEventListener('dragstart', (e) => { cell.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ move: { fromId: fid, fromDate: fd, projects: pj } })); });
+          cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
+        }
+        // Manuelle Zusätze (Büro/n.v. …) per Palette-Drop; Baustellen-Einsätze per Zellen-Drag
         cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drop'); });
         cell.addEventListener('dragleave', () => cell.classList.remove('drop'));
         cell.addEventListener('drop', (e) => {
           e.preventDefault(); cell.classList.remove('drop');
           let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
           if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
+          else if (data.move) { weekReassign(data.move.fromId, data.move.fromDate, p.id, dISO, data.move.projects); renderWeek(); }
         });
         cell.addEventListener('click', () => openCellEditor(key, p, ms));
         grid.appendChild(cell);
@@ -1173,24 +1257,32 @@
   const woverlay = document.getElementById('woverlay');
   const wText = document.getElementById('w-text');
   const wType = document.getElementById('w-type');
-  let curCell = null;
+  let curCell = null, curCellCtx = null;
   for (const key of Object.keys(CELL_TYPES)) { const o = el('option', null, CELL_TYPES[key].label); o.value = key; wType.appendChild(o); }
   function openCellEditor(key, person, ms) {
     curCell = key;
+    const der = weekDerived()[key] || { projects: [], urlaub: false };
+    curCellCtx = { key, pid: person.id, dISO: isoStr(ms), projects: der.projects.slice() };
     const a = assignments[key] || { text: '', type: 'baustelle' };
     document.getElementById('wTitle').textContent = `${person.name} · ${WDAYS[(new Date(ms).getUTCDay() + 6) % 7]} ${fmt(ms).slice(0, 6)}`;
     wText.value = a.text; wType.value = a.type;
-    document.getElementById('w-delete').style.display = assignments[key] ? '' : 'none';
+    // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
+    document.getElementById('w-delete').style.display = (assignments[key] || der.projects.length) ? '' : 'none';
     woverlay.hidden = false; wText.focus();
   }
-  function closeCellEditor() { woverlay.hidden = true; curCell = null; }
+  function closeCellEditor() { woverlay.hidden = true; curCell = null; curCellCtx = null; }
   document.getElementById('w-save').onclick = () => {
     if (!curCell) return;
     const text = wText.value.trim();
     if (!text) delete assignments[curCell]; else assignments[curCell] = { text, type: wType.value, auto: false };
     save(); renderWeek(); closeCellEditor();
   };
-  document.getElementById('w-delete').onclick = () => { if (curCell) delete assignments[curCell]; save(); renderWeek(); closeCellEditor(); };
+  document.getElementById('w-delete').onclick = () => {
+    if (curCell) delete assignments[curCell];
+    // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
+    if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
+    save(); renderWeek(); closeCellEditor();
+  };
   document.getElementById('w-cancel').onclick = () => closeCellEditor();
   woverlay.addEventListener('click', (e) => { if (e.target === woverlay) closeCellEditor(); });
   woverlay.addEventListener('keydown', (e) => {
