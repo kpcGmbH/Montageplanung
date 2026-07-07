@@ -232,17 +232,23 @@ html, body {
   font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px;
   background: rgba(255,255,255,.45); color: inherit;
 }
-/* Gewerk-Phasen (dünne Balken unter dem Fenster) */
-.phase-bar {
-  position: absolute; height: 7px; border-radius: 3px;
-  border: 1px solid rgba(0,0,0,.15); cursor: grab;
-  display: flex; align-items: center; padding: 0 3px; overflow: hidden;
-  touch-action: none; user-select: none; box-shadow: 0 1px 1px rgba(0,0,0,.12);
+/* Monteur-Lanes unter dem Fenster: je zugeordnetem Monteur eine Zeile über seine Tage */
+.lane-seg {
+  position: absolute; height: 13px; border-radius: 3px;
+  border: 1px solid rgba(0,0,0,.12); border-left-width: 3px; cursor: pointer;
+  box-shadow: 0 1px 1px rgba(0,0,0,.06);
 }
-.phase-bar:hover { filter: brightness(1.05); box-shadow: 0 1px 3px rgba(0,0,0,.28); z-index: 11; }
-.phase-bar.dragging { cursor: grabbing; opacity: .9; z-index: 12; }
-.phase-lbl { font-size: 7.5px; font-weight: 700; color: #fff; line-height: 1; white-space: nowrap; pointer-events: none; text-shadow: 0 0 2px rgba(0,0,0,.4); }
-.phase-bar .h { position: absolute; top: -2px; bottom: -2px; width: 6px; cursor: ew-resize; }
+.lane-seg:hover { filter: brightness(.96); box-shadow: 0 1px 3px rgba(0,0,0,.22); z-index: 11; }
+.lane-seg.lane-open {
+  border: 1px dashed var(--gw, #9aa0a6); border-left-width: 1px;
+  background: repeating-linear-gradient(-45deg, #fff, #fff 4px, color-mix(in srgb, var(--gw, #9aa0a6) 20%, #fff) 4px, color-mix(in srgb, var(--gw, #9aa0a6) 20%, #fff) 8px);
+}
+.lane-lbl {
+  position: absolute; height: 13px; line-height: 13px; font-size: 9px; font-weight: 600;
+  color: #3a3f44; white-space: nowrap; pointer-events: none; z-index: 12;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff;
+}
+.lane-lbl-open { font-style: italic; font-weight: 700; }
 
 .bar.conflict { outline: 2px solid #d11; outline-offset: 0; }
 .bar.conflict::after {

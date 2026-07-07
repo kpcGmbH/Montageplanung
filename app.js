@@ -405,21 +405,58 @@
     return b;
   }
 
-  // Gewerk-Phase: dünner, gewerk-farbiger Balken unter dem Fensterbalken (ziehbar; Klick öffnet den Fenster-Editor)
-  function makePhaseBar(row, windowBar, ph, laneIdx) {
-    const t = TRADES()[ph.trade] || { color: '#9aa0a6', label: ph.trade || 'Gewerk', short: '?' };
-    const x0 = dayIndex(parse(ph.start), startMs), x1 = dayIndex(parse(ph.end), startMs);
-    const b = el('div', 'phase-bar');
-    b.style.left = (x0 * dayWidth) + 'px';
-    b.style.width = Math.max((x1 - x0 + 1) * dayWidth - 2, dayWidth - 2) + 'px';
-    b.style.top = (22 + laneIdx * 8) + 'px';
-    b.style.background = t.color; b.style.borderColor = t.color;
-    b.appendChild(el('span', 'phase-lbl', (ph.count > 1 ? ph.count + '× ' : '') + t.short));
-    b.appendChild(el('div', 'h h-l')); b.appendChild(el('div', 'h h-r'));
-    b.title = `${t.label}${ph.count ? ' · ' + ph.count + ' Pers.' : ''}\n${fmt(parse(ph.start))} – ${fmt(parse(ph.end))}`;
-    b._row = row; b._bar = ph;
-    attachDrag(b, { onClick: () => openEditor(row, windowBar, false) });
-    return b;
+  // Monteur-Lanes unter dem Fenster: je zugeordnetem Monteur eine Zeile (genau über seine Tage),
+  // dazu eine schraffierte „(offen)"-Zeile für Gewerk-Tage, an denen noch nicht voll besetzt ist.
+  function phaseLanes(bar) {
+    const lanes = [];
+    if (!bar.phases || !bar.phases.length) return lanes;
+    for (const ph of bar.phases) {
+      const ranges = assignedRanges(ph);
+      const order = [], byId = {};
+      for (const r of ranges) { if (!byId[r.id]) { byId[r.id] = []; order.push(r.id); } byId[r.id].push({ start: r.start, end: r.end }); }
+      for (const id of order) lanes.push({ trade: ph.trade, name: monteurName(id), segments: byId[id] });
+      // offene Abdeckung: Werktage im Phasenfenster, an denen weniger Personen als count zugeordnet sind
+      const need = +ph.count || 0, openSegs = []; let cur = null;
+      for (let d = parse(ph.start); d <= parse(ph.end); d = addDays(d, 1)) {
+        const dow = new Date(d).getUTCDay();
+        let open = false;
+        if (dow !== 0 && dow !== 6) {
+          const have = new Set(ranges.filter(r => parse(r.start) <= d && parse(r.end) >= d).map(r => r.id)).size;
+          open = have < need;
+        }
+        if (open) { const iso = isoStr(d); if (!cur) cur = { start: iso, end: iso }; else cur.end = iso; }
+        else if (cur) { openSegs.push(cur); cur = null; }
+      }
+      if (cur) openSegs.push(cur);
+      if (openSegs.length) lanes.push({ trade: ph.trade, name: '(offen)', open: true, segments: openSegs });
+    }
+    return lanes;
+  }
+  function renderLanes(track, row, windowBar, lanes) {
+    lanes.forEach((lane, li) => {
+      const t = TRADES()[lane.trade] || { color: '#9aa0a6', short: '?', label: lane.trade || 'Gewerk' };
+      const top = 25 + li * 15;
+      let minX = Infinity;
+      for (const seg of lane.segments) {
+        const x0 = dayIndex(parse(seg.start), startMs), x1 = dayIndex(parse(seg.end), startMs);
+        if (x0 < minX) minX = x0;
+        const d = el('div', 'lane-seg' + (lane.open ? ' lane-open' : ''));
+        d.style.left = (x0 * dayWidth) + 'px';
+        d.style.width = Math.max((x1 - x0 + 1) * dayWidth - 2, 4) + 'px';
+        d.style.top = top + 'px';
+        if (lane.open) d.style.setProperty('--gw', t.color);
+        else { d.style.background = 'color-mix(in srgb, ' + t.color + ' 22%, #fff)'; d.style.borderLeftColor = t.color; }
+        d.title = t.label + (lane.open ? ' – noch nicht voll besetzt' : ' · ' + lane.name) + '\n' + fmt(parse(seg.start)) + ' – ' + fmt(parse(seg.end));
+        d._row = row; d._bar = windowBar;
+        d.addEventListener('click', () => openEditor(row, windowBar, false));
+        track.appendChild(d);
+      }
+      const lab = el('div', 'lane-lbl' + (lane.open ? ' lane-lbl-open' : ''), lane.open ? t.short + ' (offen)' : t.short + ' ' + lane.name);
+      lab.style.left = (minX * dayWidth + 5) + 'px';
+      lab.style.top = (top + 1) + 'px';
+      if (lane.open) lab.style.color = t.color;
+      track.appendChild(lab);
+    });
   }
 
   function buildBody(flags) {
@@ -467,13 +504,18 @@
         row.bars.push(bar);
         openEditor(row, bar, true);
       });
-      // Zusätzliche Höhe für Gewerk-Phasen-Lanes unter dem Fensterbalken
-      const lanes = Math.max(0, ...row.bars.map(b => (b.phases ? b.phases.length : 0)));
-      if (lanes > 0) r.style.height = (24 + lanes * 8) + 'px';
+      // Monteur-Lanes unter dem Fensterbalken – Höhe wächst mit der Zahl der Lanes
+      const laneMap = new Map();
+      for (const bar of row.bars) { if (!hiddenCats.has(effCat(row, bar))) laneMap.set(bar, phaseLanes(bar)); }
+      const lanes = Math.max(0, ...[...laneMap.values()].map(l => l.length));
+      if (lanes > 0) r.style.height = (28 + lanes * 15) + 'px';
       for (const bar of row.bars) {
         if (hiddenCats.has(effCat(row, bar))) continue;
-        track.appendChild(makeBar(row, bar, flags));
-        (bar.phases || []).forEach((ph, li) => track.appendChild(makePhaseBar(row, bar, ph, li)));
+        const wb = makeBar(row, bar, flags);
+        const bl = laneMap.get(bar) || [];
+        if (bl.length) wb.style.height = '20px';   // Fenster kompakt halten, Lanes darunter
+        track.appendChild(wb);
+        renderLanes(track, row, bar, bl);
       }
       r.appendChild(label); r.appendChild(track);
       return r;
