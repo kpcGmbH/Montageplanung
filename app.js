@@ -979,8 +979,16 @@
   let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
 
+  // Ist der (externe) Monteur in der gewählten Woche gebucht?
+  function bookedThisWeek(m) {
+    const w0 = selMonday, w1 = addDays(selMonday, 6);
+    return (m.bars || []).some(b => parse(b.start) <= w1 && parse(b.end) >= w0);
+  }
   function weekPeople() {
-    const monteure = PLAN.team.map(m => ({ id: m.id, name: m.name, kind: m.type === 'extern' ? 'extern' : 'monteur', trades: m.trades }));
+    // Externe nur zeigen, wenn sie in dieser Woche gebucht sind; interne immer.
+    const monteure = PLAN.team
+      .filter(m => m.type !== 'extern' || bookedThisWeek(m))
+      .map(m => ({ id: m.id, name: m.name, kind: m.type === 'extern' ? 'extern' : 'monteur', trades: m.trades }));
     const blGroup = PLAN.groups.find(g => g.name === 'Bauleiter');
     const bauleiter = (blGroup ? blGroup.rows : []).map(r => ({ id: r.id, name: r.label, kind: 'bauleiter' }));
     return monteure.concat(bauleiter);
@@ -1087,17 +1095,26 @@
       }
     }
     let count = 0;
-    // Trägt je Phase die zugeordneten Monteure an ihren Phasentagen (innerhalb der Woche) ins Raster ein.
-    const place = (assigned, s, e, name) => {
-      for (const pid of (assigned || [])) {
-        for (let i = 0; i < 7; i++) {
-          const ms = addDays(selMonday, i);
-          const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
-          if (parse(s) > ms || parse(e) < ms) continue;
-          const key = akey(pid, isoStr(ms));
-          if (!assignments[key]) { assignments[key] = { text: name, type: 'baustelle', auto: true }; count++; }
-        }
+    const placeCell = (pid, s, e, entry) => {
+      for (let i = 0; i < 7; i++) {
+        const ms = addDays(selMonday, i);
+        const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
+        if (parse(s) > ms || parse(e) < ms) continue;
+        const key = akey(pid, isoStr(ms));
+        if (!assignments[key]) { assignments[key] = Object.assign({ auto: true }, entry); count++; }
       }
+    };
+    // 1) Urlaub der internen Monteure zuerst (hat Vorrang vor Baustellen-Einsätzen)
+    for (const m of PLAN.team) {
+      if (m.type === 'extern') continue;
+      for (const bar of (m.bars || [])) {
+        if (bar.cat !== 'vacation') continue;
+        placeCell(m.id, bar.start, bar.end, { text: 'Urlaub', type: 'urlaub' });
+      }
+    }
+    // 2) Baustellen-Einsätze je Phase
+    const place = (assigned, s, e, name) => {
+      for (const pid of (assigned || [])) placeCell(pid, s, e, { text: name, type: 'baustelle' });
     };
     for (const { row, bar } of barsOverlappingWeek()) {
       const name = row.site || row.label;
