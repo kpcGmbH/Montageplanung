@@ -1005,14 +1005,34 @@
     return out;
   }
   function weekPalette() {
-    const names = new Map(); // name -> type
-    for (const { row, bar } of barsOverlappingWeek()) {
-      const name = row.site || row.label;
-      if (name) names.set(name, bar.cat === 'subcontractor' ? 'baustelle' : 'baustelle');
+    // Baustellen-Einsätze kommen aus dem Zeitplan; per Palette nur manuelle Zusätze
+    return [{ text: 'IBN', type: 'ibn' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
+  }
+
+  // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
+  // Urlaub (interne Vacation-Balken) und Buchung (externe). Basis für Doppelbuchungs-Anzeige.
+  function weekDerived() {
+    const map = {};
+    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], urlaub: false, booking: false }); };
+    const eachWorkday = (s, e, cb) => {
+      for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
+    };
+    for (const m of PLAN.team) for (const bar of (m.bars || [])) {
+      if (bar.cat !== 'vacation' && bar.cat !== 'booking') continue;
+      eachWorkday(bar.start, bar.end, (ms) => { const c = get(m.id, ms); if (m.type === 'extern') c.booking = true; else c.urlaub = true; });
     }
-    const chips = [...names.keys()].sort().map(n => ({ text: n, type: 'baustelle' }));
-    chips.push({ text: 'IBN', type: 'ibn' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' });
-    return chips;
+    const proj = PLAN.groups.find(g => g.name === 'Projekte');
+    if (proj) for (const row of proj.rows) {
+      const name = row.site || row.label;
+      for (const bar of row.bars) {
+        const phases = (bar.phases && bar.phases.length) ? bar.phases
+          : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
+        for (const ph of phases) for (const id of (ph.assigned || [])) {
+          eachWorkday(ph.start, ph.end, (ms) => { const c = get(id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); });
+        }
+      }
+    }
+    return map;
   }
 
   function renderWeek() {
@@ -1038,6 +1058,7 @@
       grid.appendChild(h);
     });
 
+    const derived = weekDerived();
     let lastKind = null;
     for (const p of weekPeople()) {
       if (p.kind === 'bauleiter' && lastKind !== 'bauleiter') {
@@ -1050,18 +1071,33 @@
       grid.appendChild(nameCell);
       dates.forEach((ms, i) => {
         const dISO = isoStr(ms), key = akey(p.id, dISO);
-        const a = assignments[key];
-        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (a ? ' t-' + a.type : ''));
+        const der = derived[key] || { projects: [], urlaub: false, booking: false };
+        const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
+        const proj = der.projects;
+        let text = '', type = '', conflict = false, title = '';
+        if (note) {
+          text = note.text; type = note.type;
+          if (proj.length) { conflict = true; title = 'Konflikt: im Zeitplan eingeplant (' + proj.join(', ') + '), hier manuell „' + note.text + '"'; }
+        } else if (der.urlaub && proj.length) {
+          conflict = true; type = 'nv'; text = 'Urlaub + ' + proj.join(', '); title = 'Konflikt: Urlaub trotz Einsatz (' + proj.join(', ') + ')';
+        } else if (der.urlaub) {
+          type = 'urlaub'; text = 'Urlaub';
+        } else if (proj.length > 1) {
+          conflict = true; type = 'nv'; text = proj.join(' / '); title = 'Doppelbuchung: ' + proj.join(', ');
+        } else if (proj.length === 1) {
+          type = 'baustelle'; text = proj[0]; title = proj[0];
+        }
+        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : ''));
         cell.dataset.key = key;
-        if (a) { cell.textContent = a.text; cell.draggable = true; cell.title = a.text; }
-        cell.addEventListener('dragstart', (e) => { if (a) e.dataTransfer.setData('text/plain', JSON.stringify({ from: key })); });
+        if (text) cell.textContent = text;
+        if (title) cell.title = title;
+        // Manuelle Zusätze (Büro/n.v. …) per Palette-Drop bzw. Klick; Baustellen kommen aus dem Zeitplan
         cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drop'); });
         cell.addEventListener('dragleave', () => cell.classList.remove('drop'));
         cell.addEventListener('drop', (e) => {
           e.preventDefault(); cell.classList.remove('drop');
           let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
-          if (data.from) moveAssignment(data.from, key);
-          else if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
+          if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
         });
         cell.addEventListener('click', () => openCellEditor(key, p, ms));
         grid.appendChild(cell);
@@ -1177,8 +1213,6 @@
   document.getElementById('wkPrev').onclick = () => { selMonday = addDays(selMonday, -7); renderWeek(); };
   document.getElementById('wkNext').onclick = () => { selMonday = addDays(selMonday, 7); renderWeek(); };
   document.getElementById('wkToday').onclick = () => { selMonday = mondayMs(todayMs()); renderWeek(); };
-  document.getElementById('wkVorplan').onclick = () => vorplanung(true);
-  document.getElementById('wkRefresh').onclick = () => vorplanung(false);
 
   document.getElementById('zoomIn').onclick = () => { dayWidth = Math.min(48, dayWidth + 4); render(); };
   document.getElementById('zoomOut').onclick = () => { dayWidth = Math.max(6, dayWidth - 4); render(); };

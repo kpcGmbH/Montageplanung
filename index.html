@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=23">
+  <link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
   <div class="app">
@@ -42,9 +42,7 @@
       </div>
       <span id="wkLabel" class="wk-label"></span>
       <button id="wkToday" class="btn">Diese Woche</button>
-      <button id="wkVorplan" class="btn primary" title="Woche aus den im Zeitplan zugeordneten Monteuren vorbelegen (füllt leere Zellen)">Vorplanung aus Zeitplan</button>
-      <button id="wkRefresh" class="btn" title="Automatisch erzeugte Einträge auf den aktuellen Zeitplan-Stand bringen – manuelle Einträge bleiben erhalten">↻ Aktualisieren</button>
-      <span class="wk-hint">Baustellen ziehen →</span>
+      <span class="wk-hint">Baustellen kommen live aus dem Zeitplan · Doppelbuchungen rot · Büro/n.v. per Palette ziehen →</span>
       <div id="wkPalette" class="wk-palette"></div>
     </div>
     <div id="viewport" class="viewport"></div>
@@ -177,8 +175,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=23"></script>
-  <script src="cloud.js?v=23"></script>
-  <script src="app.js?v=23"></script>
+  <script src="data.js?v=24"></script>
+  <script src="cloud.js?v=24"></script>
+  <script src="app.js?v=24"></script>
 </body>
 </html>
