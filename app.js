@@ -1133,7 +1133,7 @@
   // Urlaub (interne Vacation-Balken) und Buchung (externe). Basis für Doppelbuchungs-Anzeige.
   function weekDerived() {
     const map = {};
-    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], urlaub: false, booking: false }); };
+    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], urlaub: false, booking: false, unconfirmed: false }); };
     const eachWorkday = (s, e, cb) => {
       for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
     };
@@ -1147,8 +1147,9 @@
       for (const bar of row.bars) {
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
+        const unconf = effCat(row, bar) === 'preplanning';   // „Vorplanung / nicht bestätigt"
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (unconf) c.unconfirmed = true; });
         }
       }
     }
@@ -1277,7 +1278,7 @@
         const der = derived[key] || { projects: [], urlaub: false, booking: false };
         const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
         const proj = der.projects;
-        let text = '', type = '', conflict = false, title = '';
+        let text = '', type = '', conflict = false, title = '', unconfirmed = false;
         if (note) {
           text = note.text; type = note.type;
           if (proj.length) { conflict = true; title = 'Konflikt: im Zeitplan eingeplant (' + proj.join(', ') + '), hier manuell „' + note.text + '"'; }
@@ -1289,8 +1290,9 @@
           conflict = true; type = 'nv'; text = proj.join(' / '); title = 'Doppelbuchung: ' + proj.join(', ');
         } else if (proj.length === 1) {
           type = 'baustelle'; text = proj[0]; title = proj[0];
+          if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
         }
-        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : ''));
+        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : ''));
         cell.dataset.key = key;
         if (text) cell.textContent = text;
         if (title) cell.title = title;
