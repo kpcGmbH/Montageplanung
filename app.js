@@ -854,6 +854,7 @@
     if (rTeamOpt()) rTeamOpt().hidden = !!row;
     rName.value = row ? (row.label || '') : '';
     rRole.value = row ? (row.capRole || 'none') : (bl ? 'none' : 'teammonteur');
+    document.getElementById('r-monteur-type').value = 'intern';
     rName.placeholder = bl ? 'z. B. BL Becker' : 'z. B. Freddie Schoor / Sammel-Urlaub';
     renderResTrades();
     roverlay.hidden = false; rName.focus();
@@ -867,7 +868,10 @@
     const role = bl ? 'none' : rRole.value;
     // Einzel-Monteur: als echtes Team-Mitglied anlegen (zuweisbar, mit Gewerk) statt als Kapazitätszeile
     if (!curResource && !bl && role === 'teammonteur') {
-      PLAN.team.push({ id: 't' + Date.now(), name, type: 'intern', trades: resTrades.slice() });
+      const mtype = document.getElementById('r-monteur-type').value === 'extern' ? 'extern' : 'intern';
+      const member = { id: 't' + Date.now(), name, type: mtype, trades: resTrades.slice() };
+      if (mtype === 'extern') member.size = 1;   // Standard-Truppstärke; im Monteure-Dialog anpassbar
+      PLAN.team.push(member);
       save(); render(); closeResourceDialog(); return;
     }
     if (curResource) {
