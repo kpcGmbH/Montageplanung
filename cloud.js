@@ -18,12 +18,26 @@ window.Cloud = (function () {
   };
   const GRAPH = 'https://graph.microsoft.com/v1.0';
   const GRAPH_SCOPES = ['User.Read', 'Sites.Selected'];
-  // Läuft die App selbst in einem Popup-/App-Fenster (z. B. aus Teams/Outlook/Edge geöffnet, window.opener gesetzt)?
-  // Dann verbietet MSAL ein Anmelde-Popup („block_nested_popups") → direkt Weiterleitung nutzen.
+  // Läuft die App selbst in einem Popup-/App-Fenster (z. B. aus Teams/Outlook/Edge per Link geöffnet,
+  // window.opener gesetzt)? Dann verbietet MSAL SOWOHL Popup ALS AUCH Weiterleitung („block_nested_popups").
+  // Eine Anmeldung ist dort nicht möglich – der Nutzer muss die App im Hauptfenster/normalen Tab öffnen.
   const IN_POPUP = (() => { try { return !!window.opener && window.opener !== window; } catch (e) { return false; } })();
-  const USE_REDIRECT = IN_POPUP
-    || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  const USE_REDIRECT = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
+  // Zeigt im Login-Banner einen anklickbaren Link, der die App in einem normalen Top-Level-Tab öffnet.
+  function showOpenInMainWindow() {
+    setStatus('In diesem Fenster ist keine Microsoft-Anmeldung möglich (eingebettetes Fenster).', 'warn');
+    const err = document.getElementById('loginNoticeErr');
+    if (!err) return;
+    err.hidden = false; err.innerHTML = '';
+    err.appendChild(document.createTextNode('Dieses kleine/eingebettete Fenster (z. B. aus Teams/Outlook) erlaubt keine Anmeldung. '));
+    const a = document.createElement('a');
+    a.href = window.location.origin + window.location.pathname; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'Hier im normalen Browser-Tab öffnen';
+    a.style.fontWeight = '700'; a.style.textDecoration = 'underline';
+    err.appendChild(a);
+    err.appendChild(document.createTextNode(' – und dort auf „Anmelden".'));
+  }
 
   let msalApp = null, msalAccount = null, siteId = null, etag = null;
   let applyFn = null, statusFn = null, saveTimer = null, pendingSnap = null;
@@ -114,10 +128,13 @@ window.Cloud = (function () {
         try { await pull(); } catch (e) { setStatus('Fehler: ' + e.message, 'warn'); }
         return true;
       }
+      if (IN_POPUP) { showOpenInMainWindow(); return false; }  // im Popup-Fenster gleich den Hinweis zeigen
       setStatus('nicht angemeldet', 'off');
       return false;
     },
     async login() {
+      // Im Popup-/eingebetteten Fenster ist weder Popup noch Weiterleitung möglich → Hinweis zum Hauptfenster.
+      if (IN_POPUP) { showOpenInMainWindow(); return; }
       try {
         if (!msalApp) await msalInit();
         if (USE_REDIRECT) { await msalApp.loginRedirect({ scopes: GRAPH_SCOPES }); return; }
@@ -125,11 +142,11 @@ window.Cloud = (function () {
         try {
           r = await msalApp.loginPopup({ scopes: GRAPH_SCOPES, prompt: 'select_account' });
         } catch (popupErr) {
-          // Popup fehlgeschlagen (z. B. Popup-/App-Fenster ohne verschachtelte Popups, Browser-Blocker,
-          // Tracking-Schutz in Edge …) → auf Weiterleitung ausweichen. Nur bei bewusstem Abbrechen bzw.
-          // bereits laufender Interaktion NICHT umleiten.
+          // Popup fehlgeschlagen (Browser-Blocker, Tracking-Schutz …) → auf Weiterleitung ausweichen.
+          // Nur bei bewusstem Abbrechen bzw. bereits laufender Interaktion NICHT umleiten.
           console.error('Login-Popup-Fehler:', popupErr);
           const code = popupErr && popupErr.errorCode;
+          if (code === 'block_nested_popups') { showOpenInMainWindow(); return; }
           if (code !== 'user_cancelled' && code !== 'interaction_in_progress') {
             setStatus('Anmeldung wird weitergeleitet…', 'sync');
             await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
@@ -143,6 +160,7 @@ window.Cloud = (function () {
       } catch (e) {
         console.error('Login-Fehler:', e);
         const code = e && (e.errorCode || e.errorNo);
+        if (code === 'block_nested_popups') { showOpenInMainWindow(); return; }
         const msg = (e && (e.errorMessage || e.message)) || String(e);
         setStatus('Login-Fehler: ' + (code ? code + ' – ' : '') + msg, 'warn');
       }
