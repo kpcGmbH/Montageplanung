@@ -821,25 +821,55 @@
   const roverlay = document.getElementById('roverlay');
   const rName = document.getElementById('r-name');
   const rRole = document.getElementById('r-role');
-  let curResource = null, curResKind = 'resource';
+  let curResource = null, curResKind = 'resource', resTrades = [];
+  const rTeamOpt = () => [...rRole.options].find(o => o.value === 'teammonteur');
+  function renderResTrades() {
+    const wrap = document.getElementById('r-trades-wrap');
+    const box = document.getElementById('r-trades');
+    const show = rRole.value === 'teammonteur';
+    wrap.hidden = !show;
+    if (!show) return;
+    box.innerHTML = '';
+    for (const key of Object.keys(TRADES())) {
+      const t = TRADES()[key];
+      const on = resTrades.includes(key);
+      const chip = el('span', 'trade-chip' + (on ? ' on' : ''), t.label);
+      if (on) { chip.style.background = t.color; chip.style.borderColor = t.color; }
+      chip.onclick = () => {
+        const i = resTrades.indexOf(key);
+        if (i >= 0) resTrades.splice(i, 1); else resTrades.push(key);
+        renderResTrades();
+      };
+      box.appendChild(chip);
+    }
+  }
   function openResourceDialog(row, kind) {
-    curResource = row; curResKind = kind || 'resource';
+    curResource = row; curResKind = kind || 'resource'; resTrades = [];
     const bl = curResKind === 'bauleiter';
     document.getElementById('rTitle').textContent =
-      (row ? (bl ? 'Bauleiter bearbeiten' : 'Ressourcen-Zeile bearbeiten') : (bl ? 'Neuer Bauleiter' : 'Neue Ressourcen-Zeile'));
+      (row ? (bl ? 'Bauleiter bearbeiten' : 'Ressourcen-Zeile bearbeiten') : (bl ? 'Neuer Bauleiter' : 'Neue Zeile anlegen'));
     document.getElementById('r-role-wrap').style.display = bl ? 'none' : ''; // Bauleiter: keine Kapazitätswirkung
     document.getElementById('r-delete').style.display = row ? '' : 'none';
+    // „Einzel-Monteur" nur beim Neuanlegen (bestehende Ressourcen-Zeilen sind keine Team-Mitglieder)
+    if (rTeamOpt()) rTeamOpt().hidden = !!row;
     rName.value = row ? (row.label || '') : '';
-    rRole.value = row ? (row.capRole || 'none') : 'monteur';
-    rName.placeholder = bl ? 'z. B. BL Becker' : 'z. B. Urlaub Monteure / externe Trupps';
+    rRole.value = row ? (row.capRole || 'none') : (bl ? 'none' : 'teammonteur');
+    rName.placeholder = bl ? 'z. B. BL Becker' : 'z. B. Freddie Schoor / Sammel-Urlaub';
+    renderResTrades();
     roverlay.hidden = false; rName.focus();
   }
+  rRole.addEventListener('change', renderResTrades);
   function closeResourceDialog() { roverlay.hidden = true; curResource = null; }
   document.getElementById('r-save').onclick = () => {
     const name = rName.value.trim();
     if (!name) { rName.focus(); return; }
     const bl = curResKind === 'bauleiter';
     const role = bl ? 'none' : rRole.value;
+    // Einzel-Monteur: als echtes Team-Mitglied anlegen (zuweisbar, mit Gewerk) statt als Kapazitätszeile
+    if (!curResource && !bl && role === 'teammonteur') {
+      PLAN.team.push({ id: 't' + Date.now(), name, type: 'intern', trades: resTrades.slice() });
+      save(); render(); closeResourceDialog(); return;
+    }
     if (curResource) {
       curResource.label = name; curResource.capRole = role;
     } else {

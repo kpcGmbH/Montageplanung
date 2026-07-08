@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=33">
+  <link rel="stylesheet" href="styles.css?v=34">
 </head>
 <body>
   <div class="app">
@@ -76,13 +76,18 @@
       <label>Bezeichnung
         <input id="r-name" type="text" placeholder="z. B. Urlaub Monteure / Bauleiter Urlaub">
       </label>
-      <label id="r-role-wrap">Wirkung auf die Kapazität
+      <label id="r-role-wrap">Art der Zeile
         <select id="r-role">
-          <option value="monteur">Monteur-Urlaub – reduziert Kapazität (−1)</option>
+          <option value="teammonteur">Einzel-Monteur (intern) – zuweisbar, mit Gewerk</option>
+          <option value="monteur">Sammel-Urlaub Monteure – reduziert Kapazität (−1)</option>
           <option value="extern">Externe Trupps – erhöhen Kapazität bei Buchung (+1)</option>
-          <option value="none">Nur Info (z. B. Bauleiter) – keine Kapazität</option>
+          <option value="none">Nur Info – keine Kapazität</option>
         </select>
       </label>
+      <div id="r-trades-wrap" hidden>
+        <div class="res-hint">Gewerk(e) auswählen:</div>
+        <div id="r-trades" class="m-trades"></div>
+      </div>
       <div class="dialog-actions">
         <button id="r-delete" class="btn danger">Löschen</button>
         <div class="spacer"></div>
@@ -177,8 +182,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=33"></script>
-  <script src="cloud.js?v=33"></script>
-  <script src="app.js?v=33"></script>
+  <script src="data.js?v=34"></script>
+  <script src="cloud.js?v=34"></script>
+  <script src="app.js?v=34"></script>
 </body>
 </html>

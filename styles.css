@@ -429,6 +429,9 @@ html, body {
 }
 .trade-chip.on { color: #fff; border-color: transparent; font-weight: 600; }
 .m-cap-sub { color: #6b7177; }
+#r-trades-wrap { margin-top: 8px; }
+#r-trades-wrap[hidden] { display: none; }
+.res-hint { font-size: 11.5px; color: #676c6f; margin: 0 0 5px; }
 
 /* Qualifikations-Tags (z. B. in der Termin-Zuordnung) */
 .trade-tags { display: inline-flex; gap: 3px; margin-left: 5px; vertical-align: middle; }
