@@ -1089,10 +1089,11 @@
   // Manuelle Zell-Typen (Zusätze) – KEIN „baustelle": Baustellen-Einsätze kommen aus dem Zeitplan
   // und würden mit type==='baustelle' beim Rendern ausgeblendet. Default = erster Eintrag (ibn).
   const CELL_TYPES = {
-    ibn:       { label: 'IBN / Inbetriebnahme' },
-    buero:     { label: 'Büro / Info' },
-    nv:        { label: 'n.v. / nicht verfügbar' },
-    urlaub:    { label: 'Urlaub' },
+    ibn:          { label: 'IBN / Inbetriebnahme' },
+    kundendienst: { label: 'Kundendienst' },
+    buero:        { label: 'Büro / Info' },
+    nv:           { label: 'n.v. / nicht verfügbar' },
+    urlaub:       { label: 'Urlaub' },
   };
   const CELL_TYPE_DEFAULT = 'ibn';
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
@@ -1126,7 +1127,7 @@
   }
   function weekPalette() {
     // Baustellen-Einsätze kommen aus dem Zeitplan; per Palette nur manuelle Zusätze
-    return [{ text: 'IBN', type: 'ibn' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
+    return [{ text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
   }
 
   // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
