@@ -18,7 +18,11 @@ window.Cloud = (function () {
   };
   const GRAPH = 'https://graph.microsoft.com/v1.0';
   const GRAPH_SCOPES = ['User.Read', 'Sites.Selected'];
-  const USE_REDIRECT = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  // Läuft die App selbst in einem Popup-/App-Fenster (z. B. aus Teams/Outlook/Edge geöffnet, window.opener gesetzt)?
+  // Dann verbietet MSAL ein Anmelde-Popup („block_nested_popups") → direkt Weiterleitung nutzen.
+  const IN_POPUP = (() => { try { return !!window.opener && window.opener !== window; } catch (e) { return false; } })();
+  const USE_REDIRECT = IN_POPUP
+    || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
 
   let msalApp = null, msalAccount = null, siteId = null, etag = null;
@@ -121,11 +125,12 @@ window.Cloud = (function () {
         try {
           r = await msalApp.loginPopup({ scopes: GRAPH_SCOPES, prompt: 'select_account' });
         } catch (popupErr) {
-          // Läuft die App selbst in einem Popup-/App-Fenster (z. B. aus Teams/Outlook geöffnet),
-          // verbietet MSAL verschachtelte Popups → auf Weiterleitung ausweichen. Gleiches gilt,
-          // wenn der Browser das Popup blockiert.
+          // Popup fehlgeschlagen (z. B. Popup-/App-Fenster ohne verschachtelte Popups, Browser-Blocker,
+          // Tracking-Schutz in Edge …) → auf Weiterleitung ausweichen. Nur bei bewusstem Abbrechen bzw.
+          // bereits laufender Interaktion NICHT umleiten.
+          console.error('Login-Popup-Fehler:', popupErr);
           const code = popupErr && popupErr.errorCode;
-          if (['block_nested_popups', 'popup_window_error', 'empty_window_error'].indexOf(code) >= 0) {
+          if (code !== 'user_cancelled' && code !== 'interaction_in_progress') {
             setStatus('Anmeldung wird weitergeleitet…', 'sync');
             await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
             return;
