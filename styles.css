@@ -337,6 +337,8 @@ html, body {
 .wk-cell.drop { outline: 2px dashed var(--copper); outline-offset: -2px; background: #fbf1e6; }
 .wk-cell.dragging { opacity: 0.45; }
 .wk-cell.wk-conflict { background: #f4645a !important; color: #fff; font-weight: 700; outline: 2px solid #c0271c; outline-offset: -2px; }
+/* Überschreibung eines geplanten Einsatzes – Marker „↷" zeigt: verplant, hier ersetzt (Einsatz jetzt offen) */
+.wk-cell.wk-override::after { content: '↷'; margin-left: 5px; font-weight: 700; }
 /* Noch nicht bestätigter Termin (Vorplanung) – orange gestreift statt einfarbig blau */
 .wk-cell.wk-unconfirmed {
   background: repeating-linear-gradient(-45deg, #fdecd9, #fdecd9 6px, #f8dcb8 6px, #f8dcb8 12px);

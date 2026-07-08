@@ -1134,6 +1134,13 @@
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
   let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
+  // Manuelle Überschreibung im Wochenkalender (Büro/n.v./Urlaub/Kundendienst …)? Dann ist die Person
+  // an dem Tag NICHT auf dem geplanten Zeitplan-Einsatz → gibt den Phasen-Platz frei (offener Bedarf).
+  const weekOverride = (pid, dISO) => { const a = assignments[akey(pid, dISO)]; return !!(a && a.type !== 'baustelle'); };
+  // Ist die Person an dem Tag laut Zeitplan im Urlaub (interner Vacation-Balken)? Dann auch nicht verfügbar.
+  const onUrlaub = (pid, ms) => { const m = PLAN.team.find(t => t.id === pid); return !!(m && m.type !== 'extern' && (m.bars || []).some(b => b.cat === 'vacation' && parse(b.start) <= ms && parse(b.end) >= ms)); };
+  // Zugeordnet, aber an dem Tag faktisch weg (überschrieben ODER im Urlaub) → gibt den Phasen-Platz frei.
+  const unavailable = (pid, ms) => weekOverride(pid, isoStr(ms)) || onUrlaub(pid, ms);
 
   // Ist der (externe) Monteur in der gewählten Woche gebucht?
   function bookedThisWeek(m) {
@@ -1207,7 +1214,9 @@
           for (let i = 0; i < 7; i++) {
             const ms = wdays[i]; const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
             if (parse(ph.start) > ms || parse(ph.end) < ms) continue;   // Phase an dem Tag nicht aktiv
-            const have = new Set(ranges.filter(r => parse(r.start) <= ms && parse(r.end) >= ms).map(r => r.id)).size;
+            const iso = isoStr(ms);
+            // Zugeordnete an dem Tag, aber faktisch weg (überschrieben oder im Urlaub) zählen NICHT als besetzt
+            const have = new Set(ranges.filter(r => parse(r.start) <= ms && parse(r.end) >= ms).map(r => r.id).filter(id => !unavailable(id, ms))).size;
             const open = need - have;
             if (open > 0) { days[isoStr(ms)] = open; anyOpen = true; }
           }
@@ -1314,10 +1323,10 @@
         const der = derived[key] || { projects: [], urlaub: false, booking: false };
         const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
         const proj = der.projects;
-        let text = '', type = '', conflict = false, title = '', unconfirmed = false;
+        let text = '', type = '', conflict = false, title = '', unconfirmed = false, override = false;
         if (note) {
           text = note.text; type = note.type;
-          if (proj.length) { conflict = true; title = 'Konflikt: im Zeitplan eingeplant (' + proj.join(', ') + '), hier manuell „' + note.text + '"'; }
+          if (proj.length) { conflict = true; override = true; title = 'Überschreibt geplanten Einsatz: ' + proj.join(', ') + ' → dieser Einsatz ist jetzt offener Bedarf. (manuell hier: „' + note.text + '")'; }
         } else if (der.urlaub && proj.length) {
           conflict = true; type = 'nv'; text = 'Urlaub + ' + proj.join(', '); title = 'Konflikt: Urlaub trotz Einsatz (' + proj.join(', ') + ')';
         } else if (der.urlaub) {
@@ -1328,7 +1337,7 @@
           type = 'baustelle'; text = proj[0]; title = proj[0];
           if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
         }
-        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : ''));
+        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : ''));
         cell.dataset.key = key;
         if (text) cell.textContent = text;
         if (title) cell.title = title;
