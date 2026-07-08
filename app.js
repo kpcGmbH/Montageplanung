@@ -1124,6 +1124,7 @@
   // und würden mit type==='baustelle' beim Rendern ausgeblendet. Default = erster Eintrag (ibn).
   const CELL_TYPES = {
     montage:      { label: 'Montage' },
+    bauleitung:   { label: 'Bauleitung' },
     ibn:          { label: 'IBN / Inbetriebnahme' },
     kundendienst: { label: 'Kundendienst' },
     buero:        { label: 'Büro / Info' },
@@ -1169,7 +1170,7 @@
   }
   function weekPalette() {
     // Baustellen-Einsätze kommen aus dem Zeitplan; per Palette nur manuelle Zusätze
-    return [{ text: 'Montage', type: 'montage' }, { text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
+    return [{ text: 'Montage', type: 'montage' }, { text: 'Bauleitung', type: 'bauleitung' }, { text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
   }
 
   // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
