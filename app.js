@@ -1086,13 +1086,15 @@
 
   // ================= WOCHEN-EINSATZPLAN =================
   const WDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  // Manuelle Zell-Typen (Zusätze) – KEIN „baustelle": Baustellen-Einsätze kommen aus dem Zeitplan
+  // und würden mit type==='baustelle' beim Rendern ausgeblendet. Default = erster Eintrag (ibn).
   const CELL_TYPES = {
-    baustelle: { label: 'Baustelle / Einsatz' },
     ibn:       { label: 'IBN / Inbetriebnahme' },
     buero:     { label: 'Büro / Info' },
     nv:        { label: 'n.v. / nicht verfügbar' },
     urlaub:    { label: 'Urlaub' },
   };
+  const CELL_TYPE_DEFAULT = 'ibn';
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
   let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
@@ -1388,9 +1390,10 @@
     curCell = key;
     const der = weekDerived()[key] || { projects: [], urlaub: false };
     curCellCtx = { key, pid: person.id, dISO: isoStr(ms), projects: der.projects.slice() };
-    const a = assignments[key] || { text: '', type: 'baustelle' };
+    const a = assignments[key] || { text: '', type: CELL_TYPE_DEFAULT };
     document.getElementById('wTitle').textContent = `${person.name} · ${WDAYS[(new Date(ms).getUTCDay() + 6) % 7]} ${fmt(ms).slice(0, 6)}`;
-    wText.value = a.text; wType.value = a.type;
+    wText.value = a.text;
+    wType.value = (a.type && a.type !== 'baustelle') ? a.type : CELL_TYPE_DEFAULT;  // Alt-„baustelle" auf gültigen Typ ziehen
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
     document.getElementById('w-delete').style.display = (assignments[key] || der.projects.length) ? '' : 'none';
     woverlay.hidden = false; wText.focus();
