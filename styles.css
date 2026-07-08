@@ -383,6 +383,8 @@ html, body {
 .wk-chip.t-ibn { background: #fbe14a; border-color: #d8bd10; }
 .t-buero { background: #eceff2; color: #555; }
 .wk-chip.t-buero { background: #eceff2; }
+.t-montage { background: #3d7ec9; color: #fff; }
+.wk-chip.t-montage { background: #3d7ec9; color: #fff; border-color: #2f66a5; }
 .t-kundendienst { background: #2f9e8f; color: #fff; }
 .wk-chip.t-kundendienst { background: #2f9e8f; color: #fff; border-color: #24796d; }
 .t-nv, .t-urlaub { background: #f4645a; color: #fff; }

@@ -1089,13 +1089,14 @@
   // Manuelle Zell-Typen (Zusätze) – KEIN „baustelle": Baustellen-Einsätze kommen aus dem Zeitplan
   // und würden mit type==='baustelle' beim Rendern ausgeblendet. Default = erster Eintrag (ibn).
   const CELL_TYPES = {
+    montage:      { label: 'Montage' },
     ibn:          { label: 'IBN / Inbetriebnahme' },
     kundendienst: { label: 'Kundendienst' },
     buero:        { label: 'Büro / Info' },
     nv:           { label: 'n.v. / nicht verfügbar' },
     urlaub:       { label: 'Urlaub' },
   };
-  const CELL_TYPE_DEFAULT = 'ibn';
+  const CELL_TYPE_DEFAULT = 'montage';
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
   let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
@@ -1127,7 +1128,7 @@
   }
   function weekPalette() {
     // Baustellen-Einsätze kommen aus dem Zeitplan; per Palette nur manuelle Zusätze
-    return [{ text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
+    return [{ text: 'Montage', type: 'montage' }, { text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
   }
 
   // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
@@ -1412,6 +1413,15 @@
     if (curCell) delete assignments[curCell];
     // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
     if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
+    save(); renderWeek(); closeCellEditor();
+  };
+  // Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen – schnelles Kopieren, z. B. für Bauleiter
+  document.getElementById('w-week').onclick = () => {
+    if (!curCellCtx) return;
+    const text = wText.value.trim();
+    if (!text) { alert('Bitte zuerst einen Text eingeben, der auf die ganze Woche übertragen werden soll.'); return; }
+    const entry = { text, type: wType.value, auto: false };
+    for (let i = 0; i < 5; i++) assignments[akey(curCellCtx.pid, isoStr(addDays(selMonday, i)))] = Object.assign({}, entry);
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-cancel').onclick = () => closeCellEditor();
