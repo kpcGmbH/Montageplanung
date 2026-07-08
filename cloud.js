@@ -24,19 +24,21 @@ window.Cloud = (function () {
   const IN_POPUP = (() => { try { return !!window.opener && window.opener !== window; } catch (e) { return false; } })();
   const USE_REDIRECT = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
-  // Zeigt im Login-Banner einen anklickbaren Link, der die App in einem normalen Top-Level-Tab öffnet.
+  // Zeigt einen anklickbaren Link, der die App in einem normalen Top-Level-Tab öffnet (Gate + Banner).
   function showOpenInMainWindow() {
     setStatus('In diesem Fenster ist keine Microsoft-Anmeldung möglich (eingebettetes Fenster).', 'warn');
-    const err = document.getElementById('loginNoticeErr');
-    if (!err) return;
-    err.hidden = false; err.innerHTML = '';
-    err.appendChild(document.createTextNode('Dieses kleine/eingebettete Fenster (z. B. aus Teams/Outlook) erlaubt keine Anmeldung. '));
-    const a = document.createElement('a');
-    a.href = window.location.origin + window.location.pathname; a.target = '_blank'; a.rel = 'noopener';
-    a.textContent = 'Hier im normalen Browser-Tab öffnen';
-    a.style.fontWeight = '700'; a.style.textDecoration = 'underline';
-    err.appendChild(a);
-    err.appendChild(document.createTextNode(' – und dort auf „Anmelden".'));
+    for (const id of ['gateErr', 'loginNoticeErr']) {
+      const err = document.getElementById(id);
+      if (!err) continue;
+      err.hidden = false; err.innerHTML = '';
+      err.appendChild(document.createTextNode('Dieses kleine/eingebettete Fenster (z. B. aus Teams/Outlook) erlaubt keine Anmeldung. '));
+      const a = document.createElement('a');
+      a.href = window.location.origin + window.location.pathname; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'Hier im normalen Browser-Tab öffnen';
+      a.style.fontWeight = '700'; a.style.textDecoration = 'underline';
+      err.appendChild(a);
+      err.appendChild(document.createTextNode(' – und dort anmelden.'));
+    }
   }
 
   let msalApp = null, msalAccount = null, siteId = null, etag = null;
@@ -116,6 +118,7 @@ window.Cloud = (function () {
 
   return {
     isReady() { return !!msalAccount; },
+    inPopup() { return IN_POPUP; },
     account() { return msalAccount && (msalAccount.username || msalAccount.name); },
     onApply(fn) { applyFn = fn; },
     onStatus(fn) { statusFn = fn; },
@@ -133,30 +136,13 @@ window.Cloud = (function () {
       return false;
     },
     async login() {
-      // Im Popup-/eingebetteten Fenster ist weder Popup noch Weiterleitung möglich → Hinweis zum Hauptfenster.
+      // Im Popup-/eingebetteten Fenster ist keine Anmeldung möglich → Hinweis zum Hauptfenster.
       if (IN_POPUP) { showOpenInMainWindow(); return; }
+      // Weiterleitung statt Popup: robust in allen Browsern (kein Popup-Blocker, kein block_nested_popups).
       try {
         if (!msalApp) await msalInit();
-        if (USE_REDIRECT) { await msalApp.loginRedirect({ scopes: GRAPH_SCOPES }); return; }
-        let r;
-        try {
-          r = await msalApp.loginPopup({ scopes: GRAPH_SCOPES, prompt: 'select_account' });
-        } catch (popupErr) {
-          // Popup fehlgeschlagen (Browser-Blocker, Tracking-Schutz …) → auf Weiterleitung ausweichen.
-          // Nur bei bewusstem Abbrechen bzw. bereits laufender Interaktion NICHT umleiten.
-          console.error('Login-Popup-Fehler:', popupErr);
-          const code = popupErr && popupErr.errorCode;
-          if (code === 'block_nested_popups') { showOpenInMainWindow(); return; }
-          if (code !== 'user_cancelled' && code !== 'interaction_in_progress') {
-            setStatus('Anmeldung wird weitergeleitet…', 'sync');
-            await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
-            return;
-          }
-          throw popupErr;
-        }
-        msalAccount = r.account; msalApp.setActiveAccount(msalAccount);
-        setStatus('angemeldet: ' + (msalAccount.username || ''), 'ok');
-        await pull();
+        setStatus('Anmeldung wird geöffnet…', 'sync');
+        await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
       } catch (e) {
         console.error('Login-Fehler:', e);
         const code = e && (e.errorCode || e.errorNo);

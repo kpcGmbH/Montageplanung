@@ -26,6 +26,30 @@ html, body {
 }
 
 .app { display: flex; flex-direction: column; height: 100vh; }
+/* Login-Gate */
+#authGate {
+  position: fixed; inset: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  background: #f1ece5; padding: 20px;
+}
+body.authed #authGate { display: none; }
+body:not(.authed) .app { display: none; }
+.gate-card {
+  width: min(92vw, 420px); background: #fff;
+  border: 1px solid var(--line); border-top: 4px solid var(--copper); border-radius: 10px;
+  padding: 34px 30px; text-align: center; box-shadow: 0 12px 44px rgba(0,0,0,.14);
+}
+.gate-brand { font-size: 24px; font-weight: 800; color: var(--copper); letter-spacing: .5px; }
+.gate-sub { color: #676c6f; font-size: 13px; margin-top: 4px; }
+.gate-hint { color: #444; font-size: 14px; margin: 22px 0; line-height: 1.45; }
+.gate-btn { font-size: 15px; padding: 10px 22px; }
+.gate-btn[hidden] { display: none; }
+.gate-err {
+  margin-top: 16px; font-size: 12.5px; color: #7a1712; background: #fbe3e0;
+  border: 1px solid #e2a49e; border-radius: 4px; padding: 8px 10px; text-align: left; word-break: break-word;
+}
+.gate-err[hidden] { display: none; }
+.gate-err a { color: #7a1712; }
 
 /* ---- Toolbar ---- */
 .toolbar {

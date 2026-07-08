@@ -1518,21 +1518,45 @@
   const cloudReloadBtn = document.getElementById('cloudReload');
   const loginNotice = document.getElementById('loginNotice');
   const loginNoticeErr = document.getElementById('loginNoticeErr');
+  const gateHint = document.getElementById('gateHint');
+  const gateLoginBtn = document.getElementById('gateLogin');
+  const gateErr = document.getElementById('gateErr');
+  function revealApp() { document.body.classList.add('authed'); scrollToToday(); }
+  function showGateLogin() {
+    document.body.classList.remove('authed');
+    const inPopup = !!(window.Cloud && Cloud.inPopup && Cloud.inPopup());
+    if (inPopup) {
+      if (gateHint) gateHint.textContent = 'Diese Ansicht läuft in einem eingebetteten Fenster – bitte im normalen Browser-Tab öffnen:';
+      if (gateLoginBtn) gateLoginBtn.hidden = true;   // Link in #gateErr zeigt den Weg
+    } else {
+      if (gateHint) gateHint.textContent = 'Bitte mit deinem Microsoft-Konto anmelden, um den gemeinsamen Plan zu sehen.';
+      if (gateLoginBtn) gateLoginBtn.hidden = false;
+    }
+  }
   function updateCloudUI(text, cls) {
     if (cloudStatusEl) { cloudStatusEl.textContent = text; cloudStatusEl.className = 'cloud-status ' + (cls || ''); }
     const ready = !!(window.Cloud && Cloud.isReady());
     if (cloudLoginBtn) cloudLoginBtn.textContent = ready ? 'Abmelden' : 'Anmelden';
     if (loginNotice) loginNotice.hidden = ready;   // nur zeigen, solange nicht angemeldet
-    // Fehler (z. B. fehlender Admin-Consent) direkt im Banner sichtbar machen – nicht nur im kleinen Status oben rechts
+    const isErr = cls === 'warn' && !ready;
+    // Fehler direkt sichtbar machen – im In-App-Banner UND im Login-Gate (Link von showOpenInMainWindow nicht überschreiben)
     if (loginNoticeErr) {
-      const isErr = cls === 'warn' && !ready;
       loginNoticeErr.hidden = !isErr;
-      loginNoticeErr.textContent = isErr ? '✕ ' + text + ' — bitte diesen Text an die IT / Johannes weitergeben.' : '';
+      if (isErr && !loginNoticeErr.querySelector('a')) loginNoticeErr.textContent = '✕ ' + text + ' — bitte diesen Text an die IT / Johannes weitergeben.';
+      else if (!isErr) loginNoticeErr.textContent = '';
+    }
+    if (gateErr && !gateErr.querySelector('a')) {
+      gateErr.hidden = !isErr;
+      gateErr.textContent = isErr ? '✕ ' + text : '';
     }
   }
-  if (cloudLoginBtn) cloudLoginBtn.onclick = () => { if (window.Cloud) (Cloud.isReady() ? Cloud.logout() : Cloud.login()); };
+  if (cloudLoginBtn) cloudLoginBtn.onclick = () => {
+    if (!window.Cloud) return;
+    if (Cloud.isReady()) { Promise.resolve(Cloud.logout()).then(showGateLogin); } else Cloud.login();
+  };
   const loginNoticeBtn = document.getElementById('loginNoticeBtn');
   if (loginNoticeBtn) loginNoticeBtn.onclick = () => { if (window.Cloud) Cloud.login(); };
+  if (gateLoginBtn) gateLoginBtn.onclick = () => { if (window.Cloud) Cloud.login(); };
   if (cloudReloadBtn) cloudReloadBtn.onclick = () => { if (window.Cloud) Cloud.reload(); };
 
   load();
@@ -1545,7 +1569,10 @@
 
   if (window.Cloud) {
     Cloud.onStatus(updateCloudUI);
-    Cloud.onApply((data) => { applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render(); });
-    Cloud.init(); // asynchron: zieht bei Anmeldung den geteilten Stand und rendert neu
+    Cloud.onApply((data) => { applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render(); revealApp(); });
+    // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
+    Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
+  } else {
+    revealApp(); // ohne Cloud-Modul kein Gate möglich
   }
 })();
