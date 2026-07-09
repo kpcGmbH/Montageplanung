@@ -456,10 +456,10 @@
     }
     return lanes;
   }
-  function renderLanes(track, row, windowBar, lanes) {
+  function renderLanes(track, row, windowBar, lanes, yBase) {
     lanes.forEach((lane, li) => {
       const t = TRADES()[lane.trade] || { color: '#9aa0a6', short: '?', label: lane.trade || 'Gewerk' };
-      const top = 25 + li * 15;
+      const top = (yBase || 0) + 25 + li * 15;
       let minX = Infinity;
       for (const seg of lane.segments) {
         const x0 = dayIndex(parse(seg.start), startMs), x1 = dayIndex(parse(seg.end), startMs);
@@ -528,18 +528,37 @@
         row.bars.push(bar);
         openEditor(row, bar, true);
       });
-      // Monteur-Lanes unter dem Fensterbalken – Höhe wächst mit der Zahl der Lanes
+      // Monteur-Lanes unter dem Fensterbalken; sich zeitlich überlappende Fenster werden vertikal gestapelt
+      const visBars = row.bars.filter(bar => !hiddenCats.has(effCat(row, bar)));
       const laneMap = new Map();
-      for (const bar of row.bars) { if (!hiddenCats.has(effCat(row, bar))) laneMap.set(bar, phaseLanes(bar)); }
+      for (const bar of visBars) laneMap.set(bar, phaseLanes(bar));
+      const bandH = (bar) => { const n = (laneMap.get(bar) || []).length; return n > 0 ? 28 + n * 15 : 26; };
+      // Stapel-Zuweisung (Intervall-Partitionierung): sich überlappende Balken kommen in verschiedene Etagen
+      const stackMap = new Map();
+      const laneEnds = [];
+      for (const bar of visBars.slice().sort((a, b) => parse(a.start) - parse(b.start) || parse(a.end) - parse(b.end))) {
+        const s = parse(bar.start); let k = 0;
+        while (k < laneEnds.length && laneEnds[k] >= s) k++;
+        stackMap.set(bar, k); laneEnds[k] = parse(bar.end);
+      }
+      const numStacks = laneEnds.length;
+      const stacked = numStacks > 1;
+      // vertikale Position je Etage = kumulierte Höhe der Etagen darüber (+ kleine Lücke)
+      const stackH = new Array(numStacks).fill(0);
+      for (const bar of visBars) stackH[stackMap.get(bar)] = Math.max(stackH[stackMap.get(bar)], bandH(bar));
+      const stackY = []; let accY = 0;
+      for (let k = 0; k < numStacks; k++) { stackY[k] = accY; accY += stackH[k] + 4; }
       const lanes = Math.max(0, ...[...laneMap.values()].map(l => l.length));
-      if (lanes > 0) r.style.height = (28 + lanes * 15) + 'px';
-      for (const bar of row.bars) {
-        if (hiddenCats.has(effCat(row, bar))) continue;
+      if (stacked) r.style.height = accY + 'px';
+      else if (lanes > 0) r.style.height = (28 + lanes * 15) + 'px';
+      for (const bar of visBars) {
         const wb = makeBar(row, bar, flags);
         const bl = laneMap.get(bar) || [];
         if (bl.length) wb.style.height = '20px';   // Fenster kompakt halten, Lanes darunter
+        const yBase = stacked ? stackY[stackMap.get(bar)] : 0;
+        if (stacked) { wb.style.top = (yBase + 3) + 'px'; wb.style.height = '20px'; }
         track.appendChild(wb);
-        renderLanes(track, row, bar, bl);
+        renderLanes(track, row, bar, bl, yBase);
       }
       r.appendChild(label); r.appendChild(track);
       return r;
