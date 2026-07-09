@@ -345,6 +345,30 @@
     }
     save();
   }
+  // Verschiebt den GANZEN Einsatz (Montagebalken + alle Phasen + Zuordnungen) um die Tagesdifferenz.
+  // Grundlage für „Einsatz um einen Tag nach vorne/hinten" per Drag in der Woche → wirkt im Zeitplan.
+  function weekShiftEinsatz(pid, fromDate, toDate, projectNames) {
+    const delta = Math.round((parse(toDate) - parse(fromDate)) / MS_DAY);
+    if (!delta) return;
+    const names = projectNames || [], D = parse(fromDate);
+    const sh = (iso) => isoStr(addDays(parse(iso), delta));
+    for (const row of projRows()) {
+      const nm = row.site || row.label;
+      if (names.length && names.indexOf(nm) < 0) continue;
+      for (const bar of row.bars) {
+        const phs = phasesOf(bar);
+        const hit = phs.some(ph => assignedRanges(ph).some(r => r.id === pid && parse(r.start) <= D && parse(r.end) >= D));
+        if (!hit) continue;
+        bar.start = sh(bar.start); bar.end = sh(bar.end);
+        for (const ph of phs) {
+          ph.start = sh(ph.start); ph.end = sh(ph.end);
+          ph.assigned = (ph.assigned || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+        }
+        save();
+        return;   // nur den einen (getroffenen) Einsatz verschieben
+      }
+    }
+  }
   // Entfernt Person an genau einem Tag aus allen (genannten) Projekten.
   function removePersonDay(pid, dayISO, projectNames) {
     const names = projectNames || [];
@@ -1356,7 +1380,12 @@
           e.preventDefault(); cell.classList.remove('drop');
           let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
           if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
-          else if (data.move) { weekReassign(data.move.fromId, data.move.fromDate, p.id, dISO, data.move.projects); renderWeek(); }
+          else if (data.move) {
+            // gleiche Person, anderer Tag = ganzen Einsatz verschieben; andere Person = Übergabe dieses Tages
+            if (data.move.fromId === p.id) weekShiftEinsatz(p.id, data.move.fromDate, dISO, data.move.projects);
+            else weekReassign(data.move.fromId, data.move.fromDate, p.id, dISO, data.move.projects);
+            renderWeek();
+          }
         });
         cell.addEventListener('click', () => openCellEditor(key, p, ms));
         grid.appendChild(cell);

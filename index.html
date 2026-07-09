@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=40">
+  <link rel="stylesheet" href="styles.css?v=41">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -53,7 +53,7 @@
       </div>
       <span id="wkLabel" class="wk-label"></span>
       <button id="wkToday" class="btn">Diese Woche</button>
-      <span class="wk-hint">Baustellen live aus dem Zeitplan · Doppelbuchungen rot · orange gestreift = noch nicht bestätigt · Büro/n.v. per Palette ziehen →</span>
+      <span class="wk-hint">Einsatz auf anderen Tag ziehen = ganzer Einsatz verschiebt sich (wirkt im Zeitplan) · auf andere Person ziehen = Übergabe · orange gestreift = unbestätigt · Büro/n.v. per Palette →</span>
       <div id="wkPalette" class="wk-palette"></div>
     </div>
     <div id="viewport" class="viewport"></div>
@@ -198,8 +198,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=40"></script>
-  <script src="cloud.js?v=40"></script>
-  <script src="app.js?v=40"></script>
+  <script src="data.js?v=41"></script>
+  <script src="cloud.js?v=41"></script>
+  <script src="app.js?v=41"></script>
 </body>
 </html>
