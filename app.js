@@ -48,7 +48,33 @@
     if (data && data.assignments) assignments = data.assignments;
   }
   function saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot())); } catch (e) {} }
-  function save() { saveLocal(); if (window.Cloud) Cloud.scheduleSave(snapshot()); }
+  // ---- Undo/Redo: Verlauf lokaler Änderungen als Snapshot-Historie ----
+  const undoStack = [], redoStack = [], MAX_HIST = 80;
+  let histPrev = null, suppressHistory = false;
+  function updateUndoUI() {
+    const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
+    if (u) u.disabled = undoStack.length === 0;
+    if (r) r.disabled = redoStack.length === 0;
+  }
+  function histReset() { histPrev = JSON.stringify(snapshot()); undoStack.length = 0; redoStack.length = 0; updateUndoUI(); }
+  function applyHistState(json) {
+    histPrev = json;
+    applySnapshot(JSON.parse(json));
+    suppressHistory = true; saveLocal(); if (window.Cloud) Cloud.scheduleSave(snapshot()); suppressHistory = false;
+    buildLegend(); render(); updateUndoUI();
+  }
+  function undo() { if (!undoStack.length) return; redoStack.push(histPrev); applyHistState(undoStack.pop()); }
+  function redo() { if (!redoStack.length) return; undoStack.push(histPrev); applyHistState(redoStack.pop()); }
+  function save() {
+    saveLocal();
+    const snap = snapshot(), json = JSON.stringify(snap);
+    if (json !== histPrev) {
+      if (!suppressHistory && histPrev !== null) { undoStack.push(histPrev); if (undoStack.length > MAX_HIST) undoStack.shift(); redoStack.length = 0; }
+      histPrev = json;
+    }
+    if (window.Cloud) Cloud.scheduleSave(snap);
+    updateUndoUI();
+  }
   function load() {
     let raw; try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { return; }
     if (!raw) return;
@@ -1545,6 +1571,17 @@
   document.getElementById('addProject').onclick = () => openProjectDialog(null);
   document.getElementById('addResource').onclick = () => openResourceDialog(null, 'resource');
   document.getElementById('search').oninput = (e) => { filter = e.target.value.trim().toLowerCase(); render(); };
+  document.getElementById('undoBtn').onclick = () => undo();
+  document.getElementById('redoBtn').onclick = () => redo();
+  // Tastenkürzel: Strg/Cmd+Z = Rückgängig, Strg/Cmd+Umschalt+Z oder Strg+Y = Wiederholen (nicht beim Tippen)
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+  });
 
   const legend = document.getElementById('legend');
   function buildLegend() {
@@ -1614,10 +1651,12 @@
   buildLegend();
   render();
   scrollToToday();
+  histReset();   // Ausgangszustand als Historie-Basis (erste Aktion wird rückgängig-fähig)
 
   if (window.Cloud) {
     Cloud.onStatus(updateCloudUI);
-    Cloud.onApply((data) => { applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render(); revealApp(); });
+    // Fremd-/Erststand aus der Cloud ist kein eigener Undo-Schritt → Historie danach neu aufsetzen
+    Cloud.onApply((data) => { applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render(); histReset(); revealApp(); });
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
     Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
   } else {

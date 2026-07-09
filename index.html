@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=42">
+  <link rel="stylesheet" href="styles.css?v=43">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -23,6 +23,10 @@
       <div class="btn-group view-toggle">
         <button id="viewTimeline" class="btn active" title="Zeitplan &amp; Auslastung">Zeitplan</button>
         <button id="viewWeek" class="btn" title="Wochen-Einsatzplan">Woche</button>
+      </div>
+      <div class="btn-group">
+        <button id="undoBtn" class="btn" title="Rückgängig (Strg+Z)" disabled>↶ Rückgängig</button>
+        <button id="redoBtn" class="btn" title="Wiederholen (Strg+Umschalt+Z)" disabled>↷</button>
       </div>
       <input id="search" class="search timeline-only" type="search" placeholder="Projekt / Montage suchen…">
       <div class="btn-group timeline-only">
@@ -198,8 +202,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=42"></script>
-  <script src="cloud.js?v=42"></script>
-  <script src="app.js?v=42"></script>
+  <script src="data.js?v=43"></script>
+  <script src="cloud.js?v=43"></script>
+  <script src="app.js?v=43"></script>
 </body>
 </html>
