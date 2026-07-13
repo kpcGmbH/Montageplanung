@@ -1,11 +1,17 @@
+/* kpc Hausschrift: Roboto Condensed (Light = Standard) */
+@font-face { font-family: 'Roboto Condensed'; font-style: normal; font-weight: 300; font-display: swap; src: url('assets/fonts/RobotoCondensed-Light.ttf') format('truetype'); }
+@font-face { font-family: 'Roboto Condensed'; font-style: normal; font-weight: 400; font-display: swap; src: url('assets/fonts/RobotoCondensed-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Roboto Condensed'; font-style: normal; font-weight: 700; font-display: swap; src: url('assets/fonts/RobotoCondensed-Bold.ttf') format('truetype'); }
+
 :root {
   --dw: 18px;              /* Tagesbreite */
   --label-w: 230px;        /* Breite der Zeilenbeschriftung */
   --row-h: 24px;
   --header-h: 56px;
-  --copper: #b87333;
-  --copper-dark: #8c5523;
-  --ink: #23272b;
+  --copper: #895612;       /* kpc Kupfer */
+  --copper-dark: #6b4310;
+  --grey: #676C6F;         /* kpc Grau (Sekundärtext) */
+  --ink: #1b1c1d;
   --line: #e2e5e9;
   --line-strong: #c7ccd2;
   --bg: #ffffff;
@@ -19,10 +25,11 @@
 html, body {
   margin: 0;
   height: 100%;
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Roboto Condensed', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 300;
   color: var(--ink);
   background: var(--bg);
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 .app { display: flex; flex-direction: column; height: 100vh; }
@@ -39,8 +46,9 @@ body:not(.authed) .app { display: none; }
   border: 1px solid var(--line); border-top: 4px solid var(--copper); border-radius: 10px;
   padding: 34px 30px; text-align: center; box-shadow: 0 12px 44px rgba(0,0,0,.14);
 }
-.gate-brand { font-size: 24px; font-weight: 800; color: var(--copper); letter-spacing: .5px; }
-.gate-sub { color: #676c6f; font-size: 13px; margin-top: 4px; }
+.gate-logo { width: 190px; max-width: 70%; height: auto; display: block; margin: 0 auto 20px; }
+.gate-brand { font-size: 24px; font-weight: 700; color: var(--copper); letter-spacing: .5px; }
+.gate-sub { color: var(--grey); font-size: 13px; margin-top: 4px; }
 .gate-hint { color: #444; font-size: 14px; margin: 22px 0; line-height: 1.45; }
 .gate-btn { font-size: 15px; padding: 10px 22px; }
 .gate-btn[hidden] { display: none; }
@@ -62,13 +70,16 @@ body:not(.authed) .app { display: none; }
   flex: 0 0 auto;
 }
 .toolbar .brand {
+  display: flex; align-items: center; gap: 10px;
   font-weight: 700;
   font-size: 15px;
   color: var(--copper-dark);
   letter-spacing: .2px;
   white-space: nowrap;
 }
-.toolbar .brand small { color: #8a8f96; font-weight: 500; margin-left: 6px; }
+.toolbar .brand .brand-logo { height: 30px; width: auto; display: block; }
+.toolbar .brand .brand-title { padding-left: 10px; border-left: 2px solid var(--copper); }
+.toolbar .brand small { color: var(--grey); font-weight: 400; margin-left: 6px; }
 
 .toolbar .spacer { flex: 1 1 auto; }
 

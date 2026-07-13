@@ -4,14 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=44">
+  <link rel="stylesheet" href="styles.css?v=45">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
   <div id="authGate">
     <div class="gate-card">
+      <img class="gate-logo" src="assets/kpc-logo.png" alt="kpc">
       <div class="gate-brand">Montageplanung</div>
-      <div class="gate-sub">KPC · gemeinsame Montageplanung</div>
+      <div class="gate-sub">gemeinsame Montageplanung</div>
       <p id="gateHint" class="gate-hint">Anmeldung wird geprüft …</p>
       <button id="gateLogin" class="btn primary gate-btn" hidden>Mit Microsoft anmelden</button>
       <div id="gateErr" class="gate-err" hidden></div>
@@ -19,7 +20,7 @@
   </div>
   <div class="app">
     <div class="toolbar">
-      <div class="brand">Montageplanung</div>
+      <div class="brand"><img class="brand-logo" src="assets/kpc-logo.png" alt="kpc"><span class="brand-title">Montageplanung</span></div>
       <div class="btn-group view-toggle">
         <button id="viewTimeline" class="btn active" title="Zeitplan &amp; Auslastung">Zeitplan</button>
         <button id="viewWeek" class="btn" title="Wochen-Einsatzplan">Woche</button>
@@ -202,8 +203,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=44"></script>
-  <script src="cloud.js?v=44"></script>
-  <script src="app.js?v=44"></script>
+  <script src="data.js?v=45"></script>
+  <script src="cloud.js?v=45"></script>
+  <script src="app.js?v=45"></script>
 </body>
 </html>
