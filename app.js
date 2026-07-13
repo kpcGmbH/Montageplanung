@@ -533,6 +533,11 @@
       } else if (editable) {
         label.classList.add('editable');
         label.addEventListener('dblclick', () => isProjects ? openProjectDialog(row) : openResourceDialog(row, isBauleiter ? 'bauleiter' : 'resource'));
+        if (isProjects) {
+          const ti = el('span', 'row-ti', '✉'); ti.title = 'Termineinladung erstellen';
+          ti.onclick = (e) => { e.stopPropagation(); openTermineinladung(row); };
+          label.appendChild(ti);
+        }
         const del = el('span', 'row-del', '✕'); del.title = (isProjects ? (row.site ? 'Bereich' : 'Projekt') : isBauleiter ? 'Bauleiter' : 'Zeile') + ' löschen';
         del.onclick = (e) => {
           e.stopPropagation();
@@ -1596,6 +1601,58 @@
       legend.appendChild(item);
     }
   }
+
+  // ---- Termineinladung (eingebetteter Generator + SharePoint-Zwischenspeicher pro Projekt) ----
+  const tiView = document.getElementById('tiView');
+  const tiFrame = document.getElementById('tiFrame');
+  const tiTitle = document.getElementById('tiTitle');
+  const tiStatus = document.getElementById('tiStatus');
+  let tiProject = null, tiReady = false;
+  const TI_SRC = 'termineinladung.html?v=46';
+  function tiDraftName(row) {
+    const base = ((row.nummer ? row.nummer + ' ' : '') + (row.site || row.label || ''))
+      .replace(/[^0-9A-Za-zÄÖÜäöüß ._-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
+    return (base || 'projekt') + '__' + row.id + '.json';
+  }
+  function tiPrefill(row) {
+    const bars = (row.bars || []).slice().sort((a, b) => parse(a.start) - parse(b.start));
+    let datum = '', zeitraum = '';
+    if (bars.length) { const b = bars[0]; if (b.start === b.end) datum = b.start; else zeitraum = fmt(parse(b.start)) + '–' + fmt(parse(b.end)); }
+    return { objektname: row.site || row.label || '', projektnummer: row.nummer || '', ort: row.ort || '', datum, zeitraum };
+  }
+  async function tiSendInit() {
+    if (!tiProject || !tiReady || !tiFrame.contentWindow) return;
+    let state = null;
+    if (window.Cloud && Cloud.isReady()) {
+      tiStatus.textContent = 'lade Zwischenstand …';
+      try { state = await Cloud.loadDraft(tiDraftName(tiProject)); } catch (e) { /* kein Draft / offline */ }
+    }
+    tiStatus.textContent = state ? 'Zwischenstand geladen'
+      : (window.Cloud && Cloud.isReady()) ? 'neu · aus Projektdaten vorbefüllt'
+      : 'nicht angemeldet – kein SharePoint-Speichern';
+    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id, prefill: tiPrefill(tiProject), state: state || null }, '*');
+  }
+  function openTermineinladung(row) {
+    tiProject = row;
+    tiTitle.textContent = 'Termineinladung · ' + (row.site || row.label || '');
+    tiStatus.textContent = '';
+    tiView.hidden = false;
+    if (!tiFrame.getAttribute('src')) tiFrame.setAttribute('src', TI_SRC);  // lädt einmal → sendet ti-ready
+    else tiSendInit();
+  }
+  document.getElementById('tiBack').onclick = () => { tiView.hidden = true; };
+  window.addEventListener('message', async (e) => {
+    if (!tiFrame || e.source !== tiFrame.contentWindow) return;
+    const m = e.data || {};
+    if (m.type === 'ti-ready') { tiReady = true; tiSendInit(); }
+    else if (m.type === 'ti-save') {
+      if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, '*'); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
+      tiStatus.textContent = 'speichere …';
+      try { await Cloud.saveDraft(tiDraftName(tiProject), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
+      catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, '*'); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
+    }
+    else if (m.type === 'ti-reset') { tiFrame.contentWindow.postMessage({ type: 'ti-init', prefill: tiPrefill(tiProject), state: null }, '*'); }
+  });
 
   // ---- Cloud-Sync (Microsoft-Login + SharePoint), optional ----
   const cloudStatusEl = document.getElementById('cloudStatus');

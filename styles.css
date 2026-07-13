@@ -33,6 +33,21 @@ html, body {
 }
 
 .app { display: flex; flex-direction: column; height: 100vh; }
+/* Termineinladung – eingebettete Ansicht */
+#tiView { position: fixed; inset: 0; z-index: 400; display: flex; flex-direction: column; background: #fff; }
+#tiView[hidden] { display: none; }
+.ti-bar {
+  display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+  background: linear-gradient(180deg, #fdfaf6, #f4ece3); border-bottom: 1px solid var(--line-strong); flex: 0 0 auto;
+}
+.ti-bar .ti-title { font-weight: 700; color: var(--copper-dark); white-space: nowrap; }
+.ti-bar .spacer { flex: 1 1 auto; }
+.ti-bar .ti-status { color: var(--grey); font-size: 12px; }
+#tiFrame { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
+.row-ti { margin-left: 6px; cursor: pointer; color: var(--copper); opacity: 0; transition: opacity .12s; }
+.row:hover .row-ti { opacity: .75; }
+.row-ti:hover { opacity: 1; }
+
 /* Login-Gate */
 #authGate {
   position: fixed; inset: 0; z-index: 500;

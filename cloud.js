@@ -116,9 +116,34 @@ window.Cloud = (function () {
     setStatus('gespeichert ' + hhmm(), 'ok');
   }
 
+  // Termineinladungs-Zwischenstände: je Projekt eine JSON-Datei im Ordner „Termineinladungen/"
+  const draftPath = (name) => '/sites/' + siteId + '/drive/root:/Termineinladungen/' + encodeURIComponent(name) + ':/content';
+  async function saveDraftFile(name, obj) {
+    await resolveSite();
+    const put = () => graph(draftPath(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
+    let r = await put();
+    if (r.status === 404) {   // Ordner fehlt → anlegen und erneut versuchen
+      await graph('/sites/' + siteId + '/drive/root/children',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Termineinladungen', folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }).catch(() => {});
+      r = await put();
+    }
+    if (!r.ok) throw new Error('Speichern fehlgeschlagen (' + r.status + ')');
+    return true;
+  }
+  async function loadDraftFile(name) {
+    await resolveSite();
+    const r = await graph(draftPath(name));
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('Laden fehlgeschlagen (' + r.status + ')');
+    return await r.json();
+  }
+
   return {
     isReady() { return !!msalAccount; },
     inPopup() { return IN_POPUP; },
+    saveDraft(name, obj) { return saveDraftFile(name, obj); },
+    loadDraft(name) { return loadDraftFile(name); },
     account() { return msalAccount && (msalAccount.username || msalAccount.name); },
     onApply(fn) { applyFn = fn; },
     onStatus(fn) { statusFn = fn; },

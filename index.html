@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=45">
+  <link rel="stylesheet" href="styles.css?v=46">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -62,6 +62,17 @@
       <div id="wkPalette" class="wk-palette"></div>
     </div>
     <div id="viewport" class="viewport"></div>
+  </div>
+
+  <!-- Termineinladung (eingebetteter Generator, Zwischenspeicher via SharePoint) -->
+  <div id="tiView" hidden>
+    <div class="ti-bar">
+      <button id="tiBack" class="btn">← Zurück zum Zeitplan</button>
+      <span class="ti-title" id="tiTitle">Termineinladung</span>
+      <span class="spacer"></span>
+      <span id="tiStatus" class="ti-status"></span>
+    </div>
+    <iframe id="tiFrame" title="Termineinladung" referrerpolicy="no-referrer"></iframe>
   </div>
 
   <!-- Zellen-Editor (Wochenplan) -->
@@ -203,8 +214,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=45"></script>
-  <script src="cloud.js?v=45"></script>
-  <script src="app.js?v=45"></script>
+  <script src="data.js?v=46"></script>
+  <script src="cloud.js?v=46"></script>
+  <script src="app.js?v=46"></script>
 </body>
 </html>
