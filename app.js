@@ -1425,6 +1425,12 @@
           const pj = proj.slice(), fd = dISO, fid = p.id;
           cell.addEventListener('dragstart', (e) => { cell.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ move: { fromId: fid, fromDate: fd, projects: pj } })); });
           cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
+        } else if (note) {
+          // Manuelle Notiz (Büro/n.v./Urlaub/…) auf eine andere Zelle verschieben
+          cell.draggable = true;
+          const nk = key, ntext = note.text, ntype = note.type;
+          cell.addEventListener('dragstart', (e) => { cell.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ noteMove: { fromKey: nk, text: ntext, type: ntype } })); });
+          cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
         }
         // Manuelle Zusätze (Büro/n.v. …) per Palette-Drop; Baustellen-Einsätze per Zellen-Drag
         cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drop'); });
@@ -1433,6 +1439,14 @@
           e.preventDefault(); cell.classList.remove('drop');
           let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
           if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
+          else if (data.noteMove) {
+            // Manuelle Notiz auf diese Zelle verschieben (aus der Quellzelle entfernen)
+            if (data.noteMove.fromKey !== key) {
+              delete assignments[data.noteMove.fromKey];
+              assignments[key] = { text: data.noteMove.text, type: data.noteMove.type, auto: false };
+              save(); renderWeek();
+            }
+          }
           else if (data.move) {
             // gleiche Person, anderer Tag = ganzen Einsatz verschieben; andere Person = Übergabe dieses Tages
             if (data.move.fromId === p.id) weekShiftEinsatz(p.id, data.move.fromDate, dISO, data.move.projects);
