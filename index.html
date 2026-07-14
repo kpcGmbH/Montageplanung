@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=51">
+  <link rel="stylesheet" href="styles.css?v=52">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -80,14 +80,13 @@
   <div id="woverlay" class="overlay" hidden>
     <div class="dialog" role="dialog" aria-modal="true">
       <h3 id="wTitle">Eintrag</h3>
-      <label>Projekt-Einsatz (Zeitplan)
-        <select id="w-project"></select>
-      </label>
-      <label id="w-gewerk-wrap" hidden>Gewerk
-        <select id="w-gewerk"></select>
-      </label>
+      <div id="w-proj-section">
+        <label>Baustellen an diesem Tag <span class="w-hint">(mehrere möglich)</span></label>
+        <div id="w-projects"></div>
+        <button id="w-proj-add" class="btn" type="button">+ Baustelle</button>
+      </div>
       <div id="w-note-fields">
-        <label>Notiz / Text
+        <label>… oder Notiz / Text
           <input id="w-text" type="text" placeholder="z. B. Büro, IBN, Schulung …">
         </label>
         <label>Typ / Farbe
@@ -223,8 +222,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=51"></script>
-  <script src="cloud.js?v=51"></script>
-  <script src="app.js?v=51"></script>
+  <script src="data.js?v=52"></script>
+  <script src="cloud.js?v=52"></script>
+  <script src="app.js?v=52"></script>
 </body>
 </html>
