@@ -1205,11 +1205,11 @@
     kundendienst: { label: 'Kundendienst' },
     buero:        { label: 'Büro / Info' },
     nv:           { label: 'n.v. / nicht verfügbar' },
-    urlaub:       { label: 'Urlaub' },
+    urlaub:       { label: 'frei' },
   };
   const CELL_TYPE_DEFAULT = 'montage';
   // Standardtext je Typ (wie in der Palette) – füllt das Textfeld, damit ein Eintrag ohne Tippen speicherbar ist
-  const CELL_TYPE_TEXT = { montage: 'Montage', bauleitung: 'Bauleitung', ibn: 'IBN', kundendienst: 'Kundendienst', buero: 'Büro', nv: 'n.v.', urlaub: 'Urlaub' };
+  const CELL_TYPE_TEXT = { montage: 'Montage', bauleitung: 'Bauleitung', ibn: 'IBN', kundendienst: 'Kundendienst', buero: 'Büro', nv: 'n.v.', urlaub: 'frei' };
   const CELL_TYPE_TEXT_SET = new Set(Object.keys(CELL_TYPE_TEXT).map(k => CELL_TYPE_TEXT[k]));
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
   let selMonday = mondayMs(todayMs());
@@ -1249,7 +1249,7 @@
   }
   function weekPalette() {
     // Baustellen-Einsätze kommen aus dem Zeitplan; per Palette nur manuelle Zusätze
-    return [{ text: 'Montage', type: 'montage' }, { text: 'Bauleitung', type: 'bauleitung' }, { text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'Urlaub', type: 'urlaub' }];
+    return [{ text: 'Montage', type: 'montage' }, { text: 'Bauleitung', type: 'bauleitung' }, { text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'frei', type: 'urlaub' }];
   }
 
   // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
@@ -1408,9 +1408,9 @@
           text = note.text; type = note.type;
           if (proj.length) { conflict = true; override = true; title = 'Überschreibt geplanten Einsatz: ' + proj.join(', ') + ' → dieser Einsatz ist jetzt offener Bedarf. (manuell hier: „' + note.text + '")'; }
         } else if (der.urlaub && proj.length) {
-          conflict = true; type = 'nv'; text = 'Urlaub + ' + proj.join(', '); title = 'Konflikt: Urlaub trotz Einsatz (' + proj.join(', ') + ')';
+          conflict = true; type = 'nv'; text = 'frei + ' + proj.join(', '); title = 'Konflikt: als frei markiert, aber Einsatz geplant (' + proj.join(', ') + ')';
         } else if (der.urlaub) {
-          type = 'urlaub'; text = 'Urlaub';
+          type = 'urlaub'; text = 'frei';
         } else if (proj.length > 1) {
           // Geteilter Tag: Monteur an mehreren Baustellen – gültig, kein Fehler
           type = 'baustelle'; split = true; text = proj.join(' / '); title = proj.length + ' Baustellen an diesem Tag: ' + proj.join(', ');
@@ -1503,7 +1503,7 @@
       if (m.type === 'extern') continue;
       for (const bar of (m.bars || [])) {
         if (bar.cat !== 'vacation') continue;
-        placeCell(m.id, bar.start, bar.end, { text: 'Urlaub', type: 'urlaub' });
+        placeCell(m.id, bar.start, bar.end, { text: 'frei', type: 'urlaub' });
       }
     }
     // 2) Baustellen-Einsätze je Phase
