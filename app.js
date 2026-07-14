@@ -824,7 +824,9 @@
     const cloneAssigned = (arr) => (arr || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: a.start, end: a.end }));
     if (bar.phases && bar.phases.length) {
       phaseDraft = bar.phases.map(p => ({ trade: p.trade || 'edelstahl', start: p.start, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned) }));
-    } else if (bar.crew && (+bar.crew.count > 0)) {
+    } else if (bar.crew && ((bar.crew.assigned || []).length || bar.crew.trade)) {
+      // Alt-Bedarf nur übernehmen, wenn er wirklich etwas enthält (Gewerk oder zugeordnete Monteure).
+      // Ein leeres Fenster bekommt KEINE automatische Default-Phase (kein Auto-Edelstahl).
       phaseDraft = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: cloneAssigned(bar.crew.assigned) }];
     } else {
       phaseDraft = [];
