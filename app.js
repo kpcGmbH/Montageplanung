@@ -104,6 +104,37 @@
 
   // ---- Standard-Personalbedarf für Termine ohne Angabe (Startwerte, editierbar) ----
   function workingDaysIn(x0, x1) { let n = 0; for (let i = x0; i <= x1; i++) if (days[i].work) n++; return n; }
+  // ---- Montagetage / Wochenend-Logik ----
+  // Ein Einsatz wird über Startdatum + Anzahl Montagetage definiert (Grundlage: Einsatzplanung).
+  // In der Regel Mo–Fr; bei weekend=true zählen auch Sa/So als Arbeitstag (Sonderfall).
+  const isWorkdayMs = (ms) => { const w = new Date(ms).getUTCDay(); return w >= 1 && w <= 5; };
+  // Nächster Werktag ab dem Datum (inkl. des Datums selbst).
+  function snapWorkday(iso) { let ms = parse(iso); while (!isWorkdayMs(ms)) ms = addDays(ms, 1); return isoStr(ms); }
+  // Enddatum = Datum des n-ten Montagetags ab Start (Start zählt als Tag 1, falls Arbeitstag).
+  function endFromDays(startISO, nDays, weekend) {
+    nDays = Math.max(1, Math.round(+nDays || 1));
+    let ms = parse(startISO), count = 0;
+    for (;;) {
+      if (weekend || isWorkdayMs(ms)) { count++; if (count >= nDays) return isoStr(ms); }
+      ms = addDays(ms, 1);
+    }
+  }
+  // Anzahl Montagetage im Bereich [start..end] (für Migration bestehender Phasen).
+  function daysCount(startISO, endISO, weekend) {
+    let ms = parse(startISO); const e = parse(endISO); let n = 0;
+    while (ms <= e) { if (weekend || isWorkdayMs(ms)) n++; ms = addDays(ms, 1); }
+    return Math.max(1, n);
+  }
+  const WD_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+  const wdShort = (iso) => WD_SHORT[new Date(parse(iso)).getUTCDay()];
+  // Setzt days/weekend auf einer Phase (falls fehlend) und hält end konsistent zu start+days.
+  function normalizePhase(ph) {
+    if (typeof ph.weekend !== 'boolean') ph.weekend = false;
+    if (!(+ph.days > 0)) ph.days = daysCount(ph.start, ph.end || ph.start, ph.weekend);
+    if (!ph.weekend) ph.start = snapWorkday(ph.start);
+    ph.end = endFromDays(ph.start, ph.days, ph.weekend);
+    return ph;
+  }
   function seedCrew() {
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
@@ -120,7 +151,10 @@
     if (!proj) return;
     for (const row of proj.rows) (row.bars || []).forEach((bar, bi) => {
       if (!bar.bid) bar.bid = 'b~' + row.id + '~' + (bar.start || '') + '~' + (bar.end || '') + '~' + bi;
-      (bar.phases || []).forEach((ph, pi) => { if (!ph.pid) ph.pid = bar.bid + '~p' + pi + '~' + (ph.trade || ''); });
+      (bar.phases || []).forEach((ph, pi) => {
+        if (!ph.pid) ph.pid = bar.bid + '~p' + pi + '~' + (ph.trade || '');
+        normalizePhase(ph);   // Altdaten: days/weekend nachziehen, end konsistent zu start+days
+      });
     });
   }
 
@@ -206,7 +240,7 @@
             const count = +ph.count || 0; if (count <= 0) continue;
             const x0 = clamp(dayIndex(parse(ph.start), startMs), 0, totalDays-1);
             const x1 = clamp(dayIndex(parse(ph.end), startMs), 0, totalDays-1);
-            const slots = []; for (let i = x0; i <= x1; i++) if (days[i].work) slots.push(i);
+            const slots = []; for (let i = x0; i <= x1; i++) if (days[i].work || ph.weekend) slots.push(i);
             if (!slots.length) continue;
             jobs.push({ bar, count, need: slots.length, slots, slack: 0, x0 });
           }
@@ -398,8 +432,21 @@
         if (!hit) continue;
         bar.start = sh(bar.start); bar.end = sh(bar.end);
         for (const ph of phs) {
-          ph.start = sh(ph.start); ph.end = sh(ph.end);
-          ph.assigned = (ph.assigned || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+          const oldStart = ph.start;
+          if (!(+ph.days > 0)) ph.days = daysCount(oldStart, ph.end || oldStart, ph.weekend);
+          let ns = sh(oldStart);
+          if (!ph.weekend) ns = snapWorkday(ns);
+          const pdelta = Math.round((parse(ns) - parse(oldStart)) / MS_DAY);
+          const psh = (iso) => isoStr(addDays(parse(iso), pdelta));
+          ph.start = ns; ph.end = endFromDays(ns, ph.days, ph.weekend);
+          const nsMs = parse(ns), neMs = parse(ph.end);
+          ph.assigned = (ph.assigned || []).map(a => {
+            if (typeof a === 'string') return a;
+            let rs = parse(psh(a.start)), re = parse(psh(a.end));
+            if (rs < nsMs) rs = nsMs; if (re > neMs) re = neMs;
+            if (rs > re) return null;
+            return { id: a.id, start: isoStr(rs), end: isoStr(re) };
+          }).filter(Boolean);
         }
         save();
         return;   // nur den einen (getroffenen) Einsatz verschieben
@@ -727,8 +774,22 @@
             const delta = nx0 - ox0;
             const sh = (iso) => isoStr(addDays(parse(iso), delta));
             for (const ph of (bar.phases || [])) {
-              ph.start = sh(ph.start); ph.end = sh(ph.end);
-              ph.assigned = (ph.assigned || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+              const oldStart = ph.start;
+              if (!(+ph.days > 0)) ph.days = daysCount(oldStart, ph.end || oldStart, ph.weekend);
+              let ns = sh(oldStart);
+              if (!ph.weekend) ns = snapWorkday(ns);   // Werktags-Einsatz nicht auf Sa/So beginnen lassen
+              const pdelta = Math.round((parse(ns) - parse(oldStart)) / MS_DAY);
+              const psh = (iso) => isoStr(addDays(parse(iso), pdelta));
+              ph.start = ns;
+              ph.end = endFromDays(ns, ph.days, ph.weekend);
+              const nsMs = parse(ns), neMs = parse(ph.end);
+              ph.assigned = (ph.assigned || []).map(a => {
+                if (typeof a === 'string') return a;                       // ganze Phase → wandert automatisch mit
+                let rs = parse(psh(a.start)), re = parse(psh(a.end));
+                if (rs < nsMs) rs = nsMs; if (re > neMs) re = neMs;        // auf neues Phasenfenster begrenzen
+                if (rs > re) return null;
+                return { id: a.id, start: isoStr(rs), end: isoStr(re) };
+              }).filter(Boolean);
             }
             if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
           }
@@ -765,19 +826,31 @@
       for (const k of Object.keys(TRADES())) { const o = el('option', null, TRADES()[k].label); o.value = k; sel.appendChild(o); }
       sel.value = ph.trade || 'edelstahl';
       gwL.appendChild(sel);
-      // Zeitraum / Anzahl / Löschen
+      // Start / Montagetage / Wochenende / Personen / Löschen
+      if (typeof ph.weekend !== 'boolean') ph.weekend = false;
+      if (!(+ph.days > 0)) ph.days = daysCount(ph.start, ph.end || ph.start, ph.weekend);
       const von = document.createElement('input'); von.type = 'date'; von.value = ph.start;
-      const bis = document.createElement('input'); bis.type = 'date'; bis.value = ph.end;
+      const dur = document.createElement('input'); dur.type = 'number'; dur.min = '1'; dur.step = '1'; dur.value = ph.days; dur.title = 'Anzahl Montagetage';
+      const wkc = document.createElement('input'); wkc.type = 'checkbox'; wkc.checked = !!ph.weekend; wkc.title = 'Auch am Wochenende (Sa/So) arbeiten';
       const cnt = document.createElement('input'); cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.value = ph.count || 1; cnt.title = 'Anzahl Personen';
-      von.onchange = () => { ph.start = von.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
-      bis.onchange = () => { ph.end = bis.value; if (parse(ph.end) < parse(ph.start)) { ph.end = ph.start; bis.value = ph.end; } };
+      const endHint = el('div', 'phase-endhint', '');
+      const refreshEnd = () => {
+        if (!ph.weekend) { ph.start = snapWorkday(ph.start); von.value = ph.start; }
+        ph.end = endFromDays(ph.start, ph.days, ph.weekend);
+        endHint.textContent = '→ endet ' + wdShort(ph.end) + ' ' + fmt(parse(ph.end)) + (ph.weekend ? ' · inkl. Wochenende' : '');
+      };
+      von.onchange = () => { ph.start = von.value || ph.start; refreshEnd(); };
+      dur.oninput = () => { ph.days = Math.max(1, Math.round(+dur.value || 1)); refreshEnd(); };
+      wkc.onchange = () => { ph.weekend = wkc.checked; refreshEnd(); };
       cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
       const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
       const line2 = el('div', 'phase-row2');
-      const vonL = el('label', 'phase-fld', 'Von'); vonL.appendChild(von);
-      const bisL = el('label', 'phase-fld', 'Bis'); bisL.appendChild(bis);
-      const cntL = el('label', 'phase-fld phase-cnt', 'Anz.'); cntL.appendChild(cnt);
-      line2.appendChild(vonL); line2.appendChild(bisL); line2.appendChild(cntL); line2.appendChild(del);
+      const vonL = el('label', 'phase-fld', 'Start'); vonL.appendChild(von);
+      const durL = el('label', 'phase-fld phase-cnt', 'Montagetage'); durL.appendChild(dur);
+      const wkL = el('label', 'phase-fld phase-wk', 'Sa/So'); wkL.appendChild(wkc);
+      const cntL = el('label', 'phase-fld phase-cnt', 'Pers.'); cntL.appendChild(cnt);
+      line2.appendChild(vonL); line2.appendChild(durL); line2.appendChild(wkL); line2.appendChild(cntL); line2.appendChild(del);
+      refreshEnd();
       // Monteur-Zuordnung – nur nach Gewerk qualifizierte
       const asgTitle = el('div', 'assign-title', '');
       const asg = el('div', 'assign-list');
@@ -808,7 +881,7 @@
         buildAsg();
       };
       buildAsg();
-      card.appendChild(gwL); card.appendChild(line2); card.appendChild(asgTitle); card.appendChild(asg);
+      card.appendChild(gwL); card.appendChild(line2); card.appendChild(endHint); card.appendChild(asgTitle); card.appendChild(asg);
       fPhases.appendChild(card);
     });
   }
@@ -818,10 +891,15 @@
     // Neue Phase erbt den Zeitraum der vorherigen (z. B. Elektro analog Edelstahl); Gewerk = nächstes noch nicht genutztes
     const used = new Set(phaseDraft.map(p => p.trade));
     const trade = last ? (Object.keys(TRADES()).find(k => !used.has(k)) || last.trade) : 'edelstahl';
+    const start = last ? last.start : ((b && b.start) || fStart.value);
+    const daysN = last ? last.days : 5;
+    const weekend = last ? !!last.weekend : false;
     phaseDraft.push({
       trade,
-      start: last ? last.start : ((b && b.start) || fStart.value),
-      end: last ? last.end : ((b && b.end) || fEnd.value),
+      start: weekend ? start : snapWorkday(start),
+      days: daysN,
+      weekend,
+      end: endFromDays(weekend ? start : snapWorkday(start), daysN, weekend),
       count: 1,
       assigned: [],
     });
@@ -844,11 +922,16 @@
     // Phasen laden – bestehender Sammelbedarf (crew) wird verlustfrei als erste Phase übernommen
     const cloneAssigned = (arr) => (arr || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: a.start, end: a.end }));
     if (bar.phases && bar.phases.length) {
-      phaseDraft = bar.phases.map(p => ({ trade: p.trade || 'edelstahl', start: p.start, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned) }));
+      phaseDraft = bar.phases.map(p => {
+        const weekend = !!p.weekend;
+        const daysN = +p.days > 0 ? p.days : daysCount(p.start, p.end || p.start, weekend);
+        return { trade: p.trade || 'edelstahl', start: p.start, days: daysN, weekend, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned) };
+      });
     } else if (bar.crew && ((bar.crew.assigned || []).length || bar.crew.trade)) {
       // Alt-Bedarf nur übernehmen, wenn er wirklich etwas enthält (Gewerk oder zugeordnete Monteure).
       // Ein leeres Fenster bekommt KEINE automatische Default-Phase (kein Auto-Edelstahl).
-      phaseDraft = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: cloneAssigned(bar.crew.assigned) }];
+      const cs = bar.crew.start || bar.start, ce = bar.crew.end || bar.end;
+      phaseDraft = [{ trade: bar.crew.trade || 'edelstahl', start: cs, days: daysCount(cs, ce, false), weekend: false, end: ce, count: +bar.crew.count || 1, assigned: cloneAssigned(bar.crew.assigned) }];
     } else {
       phaseDraft = [];
     }
@@ -878,7 +961,10 @@
       bar.cat = fCat.value;
       bar.phases = phaseDraft.length
         ? phaseDraft.map(p => {
-            const s = p.start, e = p.end;
+            const weekend = !!p.weekend;
+            const daysN = Math.max(1, Math.round(+p.days || 1));
+            const s = weekend ? p.start : snapWorkday(p.start);   // Werktags-Einsatz beginnt an einem Werktag
+            const e = endFromDays(s, daysN, weekend);             // Ende = Start + Montagetage (Wochenende ggf. übersprungen)
             const asg = (p.assigned || []).map(a => {
               if (typeof a === 'string') return a;                         // ganze Phase
               // Teilbereich auf das (evtl. geänderte) Phasenfenster begrenzen
@@ -886,7 +972,7 @@
               if (rs > re) return null;
               return (rs === s && re === e) ? a.id : { id: a.id, start: rs, end: re };
             }).filter(Boolean);
-            return { trade: p.trade, start: s, end: e, count: Math.max(1, +p.count || 1), assigned: asg };
+            return { trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg };
           })
         : undefined;
       delete bar.crew;
