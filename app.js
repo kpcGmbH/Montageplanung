@@ -66,6 +66,7 @@
   function undo() { if (!undoStack.length) return; redoStack.push(histPrev); applyHistState(undoStack.pop()); }
   function redo() { if (!redoStack.length) return; undoStack.push(histPrev); applyHistState(redoStack.pop()); }
   function save() {
+    ensureIds();   // neue Balken/Phasen bekommen stabile IDs vor dem Sync (fürs Zusammenführen)
     saveLocal();
     const snap = snapshot(), json = JSON.stringify(snap);
     if (json !== histPrev) {
@@ -111,6 +112,16 @@
         bar.crew = { count: bar.cat === 'preplanning' ? 2 : 1, start: bar.start, end: bar.end, assigned: [] };
       }
     }
+  }
+  // Stabile IDs für Balken (bid) und Phasen (pid) – Voraussetzung fürs zuverlässige Zusammenführen (3-Wege-Merge).
+  // Backfill deterministisch (rowId + Position + Datum), damit alle Clients einem Alt-Balken dieselbe ID geben.
+  function ensureIds() {
+    const proj = PLAN.groups.find(g => g.name === 'Projekte');
+    if (!proj) return;
+    for (const row of proj.rows) (row.bars || []).forEach((bar, bi) => {
+      if (!bar.bid) bar.bid = 'b~' + row.id + '~' + (bar.start || '') + '~' + (bar.end || '') + '~' + bi;
+      (bar.phases || []).forEach((ph, pi) => { if (!ph.pid) ph.pid = bar.bid + '~p' + pi + '~' + (ph.trade || ''); });
+    });
   }
 
   // Einmalige Migration: die alten Sammelzeilen (Monteure Urlaub / Urlaub / ext. Monteure …)
@@ -1800,6 +1811,7 @@
   load();
   migrateTeamResources();
   seedCrew();
+  ensureIds();
   saveLocal();
   buildLegend();
   render();
@@ -1808,8 +1820,14 @@
 
   if (window.Cloud) {
     Cloud.onStatus(updateCloudUI);
-    // Fremd-/Erststand aus der Cloud ist kein eigener Undo-Schritt → Historie danach neu aufsetzen
-    Cloud.onApply((data) => { applySnapshot(data); migrateTeamResources(); seedCrew(); save(); buildLegend(); render(); histReset(); revealApp(); });
+    Cloud.onSnapshot(() => snapshot());   // liefert cloud.js den aktuellen lokalen Stand fürs Zusammenführen
+    // Stand aus der Cloud anwenden (Erststand ODER Hintergrund-Merge). Bei Merge bleibt der Undo-Verlauf bestehen.
+    Cloud.onApply((data, mode) => {
+      applySnapshot(data); migrateTeamResources(); seedCrew(); ensureIds();
+      saveLocal(); buildLegend(); render();
+      if (mode === 'merge') updateUndoUI(); else histReset();
+      revealApp();
+    });
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
     Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
   } else {
