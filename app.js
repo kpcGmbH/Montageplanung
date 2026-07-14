@@ -1206,6 +1206,9 @@
     urlaub:       { label: 'Urlaub' },
   };
   const CELL_TYPE_DEFAULT = 'montage';
+  // Standardtext je Typ (wie in der Palette) – füllt das Textfeld, damit ein Eintrag ohne Tippen speicherbar ist
+  const CELL_TYPE_TEXT = { montage: 'Montage', bauleitung: 'Bauleitung', ibn: 'IBN', kundendienst: 'Kundendienst', buero: 'Büro', nv: 'n.v.', urlaub: 'Urlaub' };
+  const CELL_TYPE_TEXT_SET = new Set(Object.keys(CELL_TYPE_TEXT).map(k => CELL_TYPE_TEXT[k]));
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
   let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
@@ -1513,14 +1516,21 @@
   const wType = document.getElementById('w-type');
   let curCell = null, curCellCtx = null;
   for (const key of Object.keys(CELL_TYPES)) { const o = el('option', null, CELL_TYPES[key].label); o.value = key; wType.appendChild(o); }
+  // Typ gewählt → Textfeld passend füllen (wenn leer oder ein Standardtext), damit der Eintrag speicherbar ist
+  wType.addEventListener('change', () => {
+    const cur = wText.value.trim();
+    if (!cur || CELL_TYPE_TEXT_SET.has(cur)) wText.value = CELL_TYPE_TEXT[wType.value] || '';
+  });
   function openCellEditor(key, person, ms) {
     curCell = key;
     const der = weekDerived()[key] || { projects: [], urlaub: false };
     curCellCtx = { key, pid: person.id, dISO: isoStr(ms), projects: der.projects.slice() };
     const a = assignments[key] || { text: '', type: CELL_TYPE_DEFAULT };
     document.getElementById('wTitle').textContent = `${person.name} · ${WDAYS[(new Date(ms).getUTCDay() + 6) % 7]} ${fmt(ms).slice(0, 6)}`;
-    wText.value = a.text;
     wType.value = (a.type && a.type !== 'baustelle') ? a.type : CELL_TYPE_DEFAULT;  // Alt-„baustelle" auf gültigen Typ ziehen
+    // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
+    const blank = !assignments[key] && !der.projects.length && !der.urlaub;
+    wText.value = a.text || (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
     document.getElementById('w-delete').style.display = (assignments[key] || der.projects.length) ? '' : 'none';
     woverlay.hidden = false; wText.focus();
