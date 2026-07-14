@@ -722,6 +722,16 @@
         if (nx0 !== ox0 || nx1 !== ox1) {
           bar.start = isoStr(addDays(startMs, nx0));
           bar.end = isoStr(addDays(startMs, nx1));
+          // Beim Verschieben (nicht Resize) wandern die Gewerke/Phasen + Zuordnungen mit.
+          if (mode === 'move') {
+            const delta = nx0 - ox0;
+            const sh = (iso) => isoStr(addDays(parse(iso), delta));
+            for (const ph of (bar.phases || [])) {
+              ph.start = sh(ph.start); ph.end = sh(ph.end);
+              ph.assigned = (ph.assigned || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+            }
+            if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
+          }
           save(); render();
         }
       };
