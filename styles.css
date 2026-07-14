@@ -110,6 +110,7 @@ body:not(.authed) .app { display: none; }
 }
 .btn:hover { background: var(--bg-alt); }
 a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
+#w-note-fields[hidden], #w-gewerk-wrap[hidden] { display: none !important; }
 .btn.primary { background: var(--copper); border-color: var(--copper-dark); color: #fff; }
 .btn.primary:hover { background: var(--copper-dark); }
 .btn-group { display: inline-flex; gap: 4px; align-items: center; }

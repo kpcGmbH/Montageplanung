@@ -1530,32 +1530,91 @@
   const woverlay = document.getElementById('woverlay');
   const wText = document.getElementById('w-text');
   const wType = document.getElementById('w-type');
-  let curCell = null, curCellCtx = null;
+  const wProject = document.getElementById('w-project');
+  const wGewerk = document.getElementById('w-gewerk');
+  let curCell = null, curCellCtx = null, curCellPerson = null;
   for (const key of Object.keys(CELL_TYPES)) { const o = el('option', null, CELL_TYPES[key].label); o.value = key; wType.appendChild(o); }
+  for (const key of Object.keys(TRADES())) { const o = el('option', null, TRADES()[key].label); o.value = key; wGewerk.appendChild(o); }
+  // Projekt-Dropdown je Öffnen neu füllen (Projekte können sich ändern)
+  function fillProjectSelect(selId) {
+    wProject.innerHTML = '';
+    wProject.appendChild(Object.assign(el('option', null, '— manuelle Notiz —'), { value: '' }));
+    for (const row of projRows()) {
+      const o = el('option', null, row.site ? (row.site + ' · ' + row.label) : row.label); o.value = row.id; wProject.appendChild(o);
+    }
+    wProject.value = selId || '';
+  }
+  // Umschalten: Projekt gewählt → Gewerk zeigen, Notizfelder aus; sonst umgekehrt
+  function syncCellFields() {
+    const proj = !!wProject.value;
+    document.getElementById('w-gewerk-wrap').hidden = !proj;
+    document.getElementById('w-note-fields').hidden = proj;
+  }
+  wProject.addEventListener('change', () => {
+    if (wProject.value && curCellPerson) {
+      const t = (curCellPerson.trades || []).find(k => TRADES()[k]) || Object.keys(TRADES())[0];
+      if (t) wGewerk.value = t;   // Vorschlag: erstes Gewerk der Person
+    }
+    syncCellFields();
+  });
+  // Person an einem Tag einem Projekt/Gewerk zuordnen (schreibt in den Zeitplan)
+  function assignWeekProject(pid, ms, row, gewerk) {
+    const dISO = isoStr(ms);
+    let bar = row.bars.find(b => parse(b.start) <= ms && parse(b.end) >= ms);
+    if (!bar) { bar = { label: 'Montage', cat: 'confirmed', start: dISO, end: dISO, phases: [] }; row.bars.push(bar); }
+    if (bar.crew) { if ((bar.crew.assigned || []).length || bar.crew.trade) phasesOf(bar); else delete bar.crew; }
+    if (!bar.phases) bar.phases = [];
+    let ph = bar.phases.find(p => (p.trade || 'edelstahl') === gewerk);
+    if (!ph) { ph = { trade: gewerk, start: bar.start, end: bar.end, count: 1, assigned: [] }; bar.phases.push(ph); }
+    addToPhase(ph, pid, dISO);
+    save();
+  }
   // Typ gewählt → Textfeld passend füllen (wenn leer oder ein Standardtext), damit der Eintrag speicherbar ist
   wType.addEventListener('change', () => {
     const cur = wText.value.trim();
     if (!cur || CELL_TYPE_TEXT_SET.has(cur)) wText.value = CELL_TYPE_TEXT[wType.value] || '';
   });
+  // Zu einer abgeleiteten Projekt-Zelle das Zeitplan-Projekt (Zeile) + Gewerk der Person an dem Tag finden
+  function derivedProjectOf(pid, ms, projectNames) {
+    if (!projectNames || !projectNames.length) return { rowId: '', gewerk: '' };
+    const prow = projRows().find(r => (r.site || r.label) === projectNames[0]);
+    if (!prow) return { rowId: '', gewerk: '' };
+    for (const b of prow.bars) for (const ph of (b.phases || [])) {
+      if (assignedRanges(ph).some(rg => rg.id === pid && parse(rg.start) <= ms && parse(rg.end) >= ms)) return { rowId: prow.id, gewerk: ph.trade || '' };
+    }
+    return { rowId: prow.id, gewerk: '' };
+  }
   function openCellEditor(key, person, ms) {
-    curCell = key;
+    curCell = key; curCellPerson = person;
     const der = weekDerived()[key] || { projects: [], urlaub: false };
     curCellCtx = { key, pid: person.id, dISO: isoStr(ms), projects: der.projects.slice() };
     const a = assignments[key] || { text: '', type: CELL_TYPE_DEFAULT };
     document.getElementById('wTitle').textContent = `${person.name} · ${WDAYS[(new Date(ms).getUTCDay() + 6) % 7]} ${fmt(ms).slice(0, 6)}`;
+    // Projekt-Einsatz vorbelegen (nur wenn keine manuelle Notiz die Zelle überschreibt)
+    const dp = (!assignments[key] && der.projects.length) ? derivedProjectOf(person.id, ms, der.projects) : { rowId: '', gewerk: '' };
+    fillProjectSelect(dp.rowId);
+    if (dp.gewerk && TRADES()[dp.gewerk]) wGewerk.value = dp.gewerk;
+    else { const t = (person.trades || []).find(k => TRADES()[k]); if (t) wGewerk.value = t; }
     wType.value = (a.type && a.type !== 'baustelle') ? a.type : CELL_TYPE_DEFAULT;  // Alt-„baustelle" auf gültigen Typ ziehen
     // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
     const blank = !assignments[key] && !der.projects.length && !der.urlaub;
     wText.value = a.text || (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
+    syncCellFields();
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
     document.getElementById('w-delete').style.display = (assignments[key] || der.projects.length) ? '' : 'none';
-    woverlay.hidden = false; wText.focus();
+    woverlay.hidden = false;
   }
   function closeCellEditor() { woverlay.hidden = true; curCell = null; curCellCtx = null; }
   document.getElementById('w-save').onclick = () => {
-    if (!curCell) return;
-    const text = wText.value.trim();
-    if (!text) delete assignments[curCell]; else assignments[curCell] = { text, type: wType.value, auto: false };
+    if (!curCell || !curCellCtx) return;
+    if (wProject.value) {
+      // Projekt-Einsatz: Person dem Projekt/Gewerk an diesem Tag zuordnen (in den Zeitplan)
+      const row = projRows().find(r => r.id === wProject.value);
+      if (row) { delete assignments[curCell]; assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, wGewerk.value); }
+    } else {
+      const text = wText.value.trim();
+      if (!text) delete assignments[curCell]; else assignments[curCell] = { text, type: wType.value, auto: false };
+    }
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-delete').onclick = () => {
@@ -1567,10 +1626,16 @@
   // Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen – schnelles Kopieren, z. B. für Bauleiter
   document.getElementById('w-week').onclick = () => {
     if (!curCellCtx) return;
-    const text = wText.value.trim();
-    if (!text) { alert('Bitte zuerst einen Text eingeben, der auf die ganze Woche übertragen werden soll.'); return; }
-    const entry = { text, type: wType.value, auto: false };
-    for (let i = 0; i < 5; i++) assignments[akey(curCellCtx.pid, isoStr(addDays(selMonday, i)))] = Object.assign({}, entry);
+    if (wProject.value) {
+      // Projekt-Einsatz auf alle Werktage (Mo–Fr) dieser Person übertragen
+      const row = projRows().find(r => r.id === wProject.value);
+      if (row) for (let i = 0; i < 5; i++) { const ms = addDays(selMonday, i); delete assignments[akey(curCellCtx.pid, isoStr(ms))]; assignWeekProject(curCellCtx.pid, ms, row, wGewerk.value); }
+    } else {
+      const text = wText.value.trim();
+      if (!text) { alert('Bitte zuerst einen Text eingeben oder ein Projekt wählen, das auf die ganze Woche übertragen werden soll.'); return; }
+      const entry = { text, type: wType.value, auto: false };
+      for (let i = 0; i < 5; i++) assignments[akey(curCellCtx.pid, isoStr(addDays(selMonday, i)))] = Object.assign({}, entry);
+    }
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-cancel').onclick = () => closeCellEditor();

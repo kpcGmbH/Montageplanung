@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=50">
+  <link rel="stylesheet" href="styles.css?v=51">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -80,12 +80,20 @@
   <div id="woverlay" class="overlay" hidden>
     <div class="dialog" role="dialog" aria-modal="true">
       <h3 id="wTitle">Eintrag</h3>
-      <label>Notiz / Text
-        <input id="w-text" type="text" placeholder="z. B. Büro, IBN, Schulung …">
+      <label>Projekt-Einsatz (Zeitplan)
+        <select id="w-project"></select>
       </label>
-      <label>Typ / Farbe
-        <select id="w-type"></select>
+      <label id="w-gewerk-wrap" hidden>Gewerk
+        <select id="w-gewerk"></select>
       </label>
+      <div id="w-note-fields">
+        <label>Notiz / Text
+          <input id="w-text" type="text" placeholder="z. B. Büro, IBN, Schulung …">
+        </label>
+        <label>Typ / Farbe
+          <select id="w-type"></select>
+        </label>
+      </div>
       <div class="dialog-actions">
         <button id="w-delete" class="btn danger">Löschen</button>
         <button id="w-week" class="btn" title="Diesen Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen">Ganze Woche</button>
@@ -215,8 +223,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=50"></script>
-  <script src="cloud.js?v=50"></script>
-  <script src="app.js?v=50"></script>
+  <script src="data.js?v=51"></script>
+  <script src="cloud.js?v=51"></script>
+  <script src="app.js?v=51"></script>
 </body>
 </html>
