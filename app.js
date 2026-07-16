@@ -1414,6 +1414,43 @@
     return out;
   }
 
+  // Überblick der BESTÄTIGTEN Montagen in der gewählten Woche: je Baustelle/Fenster und Werktag,
+  // wie viele Monteure eingeplant sind. Tage ohne Monteur (auch: kein Gewerk vorgeplant) werden
+  // als Lücke markiert – damit eine bestätigte Montage ohne Einsatzplanung sofort auffällt.
+  function weekConfirmedSites() {
+    const wdays = weekDates(), out = [];
+    const w0 = selMonday, w1 = addDays(selMonday, 6);
+    for (const row of projRows()) {
+      for (const bar of row.bars) {
+        if (effCat(row, bar) !== 'confirmed') continue;
+        if (parse(bar.start) > w1 || parse(bar.end) < w0) continue;
+        const phases = (bar.phases && bar.phases.length) ? bar.phases
+          : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned, weekend: false }] : []);
+        const perDay = []; let anyGap = false, anyActive = false;
+        for (let i = 0; i < 7; i++) {
+          const ms = wdays[i], dow = new Date(ms).getUTCDay(), weekendDay = (dow === 0 || dow === 6);
+          const inWindow = parse(bar.start) <= ms && parse(bar.end) >= ms;
+          if (!inWindow) { perDay.push(null); continue; }
+          const ids = new Set(); let phaseActive = false;
+          for (const ph of phases) {
+            if (parse(ph.start) <= ms && parse(ph.end) >= ms) {
+              phaseActive = true;
+              for (const r of assignedRanges(ph)) if (parse(r.start) <= ms && parse(r.end) >= ms && !unavailable(r.id, ms)) ids.add(r.id);
+            }
+          }
+          // Wochenende nur zeigen, wenn dort tatsächlich ein (Wochenend-)Einsatz liegt – sonst keine Lücke melden.
+          if (weekendDay && !phaseActive) { perDay.push(null); continue; }
+          anyActive = true;
+          const n = ids.size;
+          if (n === 0) anyGap = true;
+          perDay.push(n);
+        }
+        if (anyActive) out.push({ name: row.site || row.label, sub: bar.label || '', perDay, anyGap, row, bar });
+      }
+    }
+    return out;
+  }
+
   // Kleines Auswahlmenü, um einen offenen Bedarf direkt in der Woche taggenau zu besetzen.
   let needMenu = null;
   function closeNeedMenu() { if (needMenu) { needMenu.remove(); needMenu = null; document.removeEventListener('mousedown', onNeedDocDown, true); } }
@@ -1468,6 +1505,37 @@
     });
 
     const derived = weekDerived();
+
+    // Sektion „Bestätigte Montagen diese Woche" – Überblick + Warnung, wenn kein Monteur eingeplant ist
+    const sites = weekConfirmedSites();
+    if (sites.length) {
+      const gaps = sites.filter(s => s.anyGap).length;
+      grid.appendChild(el('div', 'wk-sep wk-sep-sites', 'Bestätigte Montagen diese Woche' + (gaps ? ' · ' + gaps + '× ohne Monteur' : '')));
+      for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill wk-sep-sites'));
+      for (const s of sites) {
+        const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : ''));
+        if (s.anyGap) { const w = el('span', 'wk-warn', '⚠'); nameCell.appendChild(w); }
+        nameCell.appendChild(document.createTextNode(s.name + (s.sub ? ' · ' + s.sub : '')));
+        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist kein Monteur eingeplant.' : '') + '\nKlick: Einsatz bearbeiten';
+        nameCell.addEventListener('click', () => openEditor(s.row, s.bar, false));
+        grid.appendChild(nameCell);
+        dates.forEach((ms, i) => {
+          const n = s.perDay[i];
+          const cell = el('div', 'wk-cell wk-site-cell' + (i >= 5 ? ' weekend' : ''));
+          if (n === null) { /* außerhalb des Fensters – leer */ }
+          else if (n === 0) {
+            cell.classList.add('wk-site-nostaff'); cell.textContent = '—';
+            cell.title = 'Bestätigte Montage – kein Monteur eingeplant · klicken zum Bearbeiten';
+            cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
+          } else {
+            cell.classList.add('wk-site-ok'); cell.textContent = n + '×';
+            cell.title = n + ' Monteur' + (n > 1 ? 'e' : '') + ' eingeplant · klicken zum Bearbeiten';
+            cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
+          }
+          grid.appendChild(cell);
+        });
+      }
+    }
 
     // Sektion „Offener Bedarf" – Gewerke, die im Zeitplan gefordert, aber noch nicht besetzt sind
     const needs = weekOpenDemand();

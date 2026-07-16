@@ -412,6 +412,19 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
   border-right: 2px solid var(--line-strong);
 }
 .wk-sep-fill { background: #eef0f3; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+/* Sektion „Bestätigte Montagen diese Woche" */
+.wk-sep.wk-sep-sites, .wk-sep-fill.wk-sep-sites { background: #e7f2dd; color: #33600f; }
+.wk-name.wk-site-name { font-size: 11px; color: #2f4a1a; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.wk-name.wk-site-name:hover { background: #f0f6ea; }
+.wk-name.wk-site-name.wk-site-gap { color: #a12b1e; }
+.wk-warn { flex: 0 0 auto; }
+.wk-cell.wk-site-cell { cursor: pointer; font-weight: 700; font-size: 11px; }
+.wk-cell.wk-site-ok { background: color-mix(in srgb, #62a92f 16%, #fff); color: #33600f; border: 1px solid color-mix(in srgb, #62a92f 45%, #fff); outline-offset: -1px; }
+.wk-cell.wk-site-nostaff {
+  color: #a12b1e; background: repeating-linear-gradient(-45deg, #fff, #fff 5px, #f6dcd8 5px, #f6dcd8 10px);
+  border: 1.5px dashed #d0402e; outline-offset: -1.5px;
+}
+.wk-cell.wk-site-nostaff:hover, .wk-cell.wk-site-ok:hover { filter: brightness(0.97); }
 /* Sektion „Offener Bedarf" */
 .wk-sep.wk-sep-need, .wk-sep-fill.wk-sep-need { background: #f3ecdd; color: #7a5300; }
 .wk-name.wk-need-name { font-size: 11px; color: #4a4f54; display: flex; align-items: center; gap: 6px; }
