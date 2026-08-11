@@ -1822,7 +1822,8 @@
       rowEl.appendChild(psel); rowEl.appendChild(gsel); rowEl.appendChild(del);
       wProjects.appendChild(rowEl);
     });
-    document.getElementById('w-note-fields').hidden = wProjectDraft.length > 0;
+    // Notiz-/Termin-Feld bleibt immer sichtbar – ein manueller Termin kann NEBEN dem Einsatz stehen.
+    document.getElementById('w-note-fields').hidden = false;
   }
   document.getElementById('w-proj-add').onclick = () => {
     const first = projRows()[0]; if (!first) return;
@@ -1860,19 +1861,21 @@
     curCell = key; curCellPerson = person;
     const der = weekDerived()[key] || { projects: [], urlaub: false };
     curCellCtx = { key, pid: person.id, dISO: isoStr(ms), projects: der.projects.slice() };
-    const a = assignments[key] || { text: '', type: CELL_TYPE_DEFAULT };
+    // Manueller Termin/Notiz (kein Baustellen-Mirror) – kann NEBEN dem Einsatz stehen
+    const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
     document.getElementById('wTitle').textContent = `${person.name} · ${WDAYS[(new Date(ms).getUTCDay() + 6) % 7]} ${fmt(ms).slice(0, 6)}`;
-    // Baustellen vorbelegen: alle abgeleiteten Projekte des Tages (mehrere möglich), je mit Gewerk
+    // Baustellen vorbelegen: alle abgeleiteten Projekte des Tages (mehrere möglich), je mit Gewerk – IMMER,
+    // damit ein geplanter Einsatz auch dann bearbeitbar ist, wenn zusätzlich eine Notiz auf dem Tag liegt.
     wProjectDraft = [];
-    if (!assignments[key]) for (const name of der.projects) {
+    for (const name of der.projects) {
       const dp = derivedProjectOf(person.id, ms, [name]);
       if (dp.rowId) wProjectDraft.push({ rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(person) });
     }
     renderProjRows();
-    wType.value = (a.type && a.type !== 'baustelle') ? a.type : CELL_TYPE_DEFAULT;  // Alt-„baustelle" auf gültigen Typ ziehen
+    wType.value = note ? note.type : CELL_TYPE_DEFAULT;
     // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
-    const blank = !assignments[key] && !der.projects.length && !der.urlaub;
-    wText.value = a.text || (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
+    const blank = !note && !der.projects.length && !der.urlaub;
+    wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
     document.getElementById('w-delete').style.display = (assignments[key] || der.projects.length) ? '' : 'none';
     woverlay.hidden = false;
@@ -1882,18 +1885,17 @@
   document.getElementById('w-save').onclick = () => {
     if (!curCell || !curCellCtx) return;
     const who = cellPersonName(), day = fmt(parse(curCellCtx.dISO));
-    if (wProjectDraft.length) {
-      // Projekt-Einsätze: alte Tages-Zuordnungen ersetzen durch die Liste (eine oder mehrere Baustellen)
-      delete assignments[curCell];
-      removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
-      for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (row) assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, e.gewerk); }
-      const proj = wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? (r.site || r.label) : '?'; }).join(', ');
-      logChange(`${who} am ${day} zugeordnet: ${proj}`, 'woche');
-    } else {
-      const text = wText.value.trim();
-      if (!text) { delete assignments[curCell]; logChange(`Eintrag entfernt (${who}, ${day})`, 'woche'); }
-      else { assignments[curCell] = { text, type: wType.value, auto: false }; logChange(`Notiz „${text}" gesetzt (${who}, ${day})`, 'woche'); }
-    }
+    const parts = [];
+    // 1) Baustellen-Einsätze des Tages neu setzen (leer = alle für den Tag entfernen)
+    removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
+    for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (row) assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, e.gewerk); }
+    if (wProjectDraft.length) parts.push('Einsatz: ' + wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? (r.site || r.label) : '?'; }).join(', '));
+    else if (curCellCtx.projects.length) parts.push('Einsatz entfernt');
+    // 2) Manueller Termin/Notiz – UNABHÄNGIG vom Einsatz (beide können nebeneinander stehen)
+    const text = wText.value.trim();
+    if (!text) { if (assignments[curCell] && assignments[curCell].type !== 'baustelle') parts.push('Notiz entfernt'); delete assignments[curCell]; }
+    else { assignments[curCell] = { text, type: wType.value, auto: false }; parts.push('Termin: „' + text + '"'); }
+    logChange(`${who} am ${day} – ${parts.length ? parts.join(' · ') : 'keine Änderung'}`, 'woche');
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-delete').onclick = () => {
@@ -1907,18 +1909,17 @@
   // Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen – schnelles Kopieren, z. B. für Bauleiter
   document.getElementById('w-week').onclick = () => {
     if (!curCellCtx) return;
-    if (wProjectDraft.length) {
-      // Projekt-Einsätze auf alle Werktage (Mo–Fr) dieser Person übertragen
-      for (let i = 0; i < 5; i++) {
-        const ms = addDays(selMonday, i);
-        for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (row) assignWeekProject(curCellCtx.pid, ms, row, e.gewerk); }
-      }
-    } else {
-      const text = wText.value.trim();
-      if (!text) { alert('Bitte zuerst einen Text eingeben oder ein Projekt wählen, das auf die ganze Woche übertragen werden soll.'); return; }
-      const entry = { text, type: wType.value, auto: false };
-      for (let i = 0; i < 5; i++) assignments[akey(curCellCtx.pid, isoStr(addDays(selMonday, i)))] = Object.assign({}, entry);
+    const text = wText.value.trim();
+    if (!wProjectDraft.length && !text) { alert('Bitte zuerst einen Text eingeben oder ein Projekt wählen, das auf die ganze Woche übertragen werden soll.'); return; }
+    for (let i = 0; i < 5; i++) {
+      const ms = addDays(selMonday, i);
+      // Baustellen-Einsätze auf jeden Werktag übertragen
+      for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (row) assignWeekProject(curCellCtx.pid, ms, row, e.gewerk); }
+      // Manuellen Termin/Notiz zusätzlich auf jeden Werktag übertragen
+      if (text) assignments[akey(curCellCtx.pid, isoStr(ms))] = { text, type: wType.value, auto: false };
     }
+    const who = cellPersonName();
+    logChange(`${who}: auf ganze Woche übertragen${wProjectDraft.length ? ' · Einsatz' : ''}${text ? ' · Termin „' + text + '"' : ''}`, 'woche');
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-cancel').onclick = () => closeCellEditor();
