@@ -1321,9 +1321,13 @@
   const mondayMs = (ms) => { const d = new Date(ms); return addDays(ms, -((d.getUTCDay() + 6) % 7)); };
   let selMonday = mondayMs(todayMs());
   const akey = (pid, dISO) => pid + '|' + dISO;
-  // Manuelle Überschreibung im Wochenkalender (Büro/n.v./Urlaub/Kundendienst …)? Dann ist die Person
-  // an dem Tag NICHT auf dem geplanten Zeitplan-Einsatz → gibt den Phasen-Platz frei (offener Bedarf).
-  const weekOverride = (pid, dISO) => { const a = assignments[akey(pid, dISO)]; return !!(a && a.type !== 'baustelle'); };
+  // Nur echte Abwesenheit gibt einen geplanten Einsatz frei. Andere manuelle Termine (Büro, IBN,
+  // Kundendienst, Montage, eigener Text) bedeuten NICHT, dass die Person weg ist – sie koexistieren
+  // mit dem Einsatz (z. B. nur anteilig am Tag) und werden zusätzlich angezeigt.
+  const ABSENCE_TYPES = new Set(['urlaub', 'nv']);
+  // Manuelle Abwesenheit (frei / n.v.) im Wochenkalender? Dann ist die Person an dem Tag NICHT auf dem
+  // geplanten Zeitplan-Einsatz → gibt den Phasen-Platz frei (offener Bedarf).
+  const weekOverride = (pid, dISO) => { const a = assignments[akey(pid, dISO)]; return !!(a && ABSENCE_TYPES.has(a.type)); };
   // Ist die Person an dem Tag laut Zeitplan im Urlaub (interner Vacation-Balken)? Dann auch nicht verfügbar.
   const onUrlaub = (pid, ms) => { const m = PLAN.team.find(t => t.id === pid); return !!(m && m.type !== 'extern' && (m.bars || []).some(b => b.cat === 'vacation' && parse(b.start) <= ms && parse(b.end) >= ms)); };
   // Zugeordnet, aber an dem Tag faktisch weg (überschrieben ODER im Urlaub) → gibt den Phasen-Platz frei.
@@ -1578,8 +1582,15 @@
         const der = derived[key] || { projects: [], urlaub: false, booking: false };
         const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
         const proj = der.projects;
-        let text = '', type = '', conflict = false, title = '', unconfirmed = false, override = false, split = false;
-        if (note) {
+        let text = '', type = '', conflict = false, title = '', unconfirmed = false, override = false, split = false, extra = '', extraType = '';
+        const noteAbsence = note && ABSENCE_TYPES.has(note.type);
+        if (note && proj.length && !noteAbsence) {
+          // Kombinierter Tag: geplanter Einsatz UND manueller Termin bleiben beide bestehen (z. B. nur anteilig).
+          type = 'baustelle'; split = proj.length > 1;
+          text = proj.join(' / '); extra = note.text; extraType = note.type;
+          if (der.unconfirmed) unconfirmed = true;
+          title = 'Geplanter Einsatz: ' + proj.join(', ') + '\n+ Termin: ' + note.text + '\n(gleicher Tag – evtl. nur anteilig; beide bleiben bestehen)';
+        } else if (note) {
           text = note.text; type = note.type;
           if (proj.length) { conflict = true; override = true; title = 'Überschreibt geplanten Einsatz: ' + proj.join(', ') + ' → dieser Einsatz ist jetzt offener Bedarf. (manuell hier: „' + note.text + '")'; }
         } else if (der.urlaub && proj.length) {
@@ -1596,6 +1607,11 @@
         const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : '') + (split ? ' wk-split' : ''));
         cell.dataset.key = key;
         if (text) cell.textContent = text;
+        if (extra) {
+          cell.classList.add('wk-combined');
+          const chip = el('span', 'wk-extra' + (extraType ? ' t-' + extraType : ''), extra);
+          cell.appendChild(chip);
+        }
         if (title) cell.title = title;
         // Baustellen-Einsatz (aus dem Zeitplan) lässt sich taggenau auf eine andere Person/einen anderen Tag ziehen
         if (proj.length && !note && !der.urlaub) {
