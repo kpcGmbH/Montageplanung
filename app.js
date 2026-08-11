@@ -40,12 +40,15 @@
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
     const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, capRole: r.capRole, bars: r.bars })) }));
-    return { groups, team: PLAN.team, assignments };
+    return { groups, team: PLAN.team, assignments, changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
     if (data && Array.isArray(data.groups) && data.groups.length) PLAN.groups = data.groups;
     if (data && Array.isArray(data.team) && data.team.length) PLAN.team = data.team;
     if (data && data.assignments) assignments = data.assignments;
+    // Changelog (Änderungsverlauf) – geteilt über den 3-Wege-Merge (Array-Vereinigung über id)
+    if (data && Array.isArray(data.changelog)) PLAN.changelog = data.changelog;
+    else PLAN.changelog = PLAN.changelog || [];
   }
   function saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot())); } catch (e) {} }
   // ---- Undo/Redo: Verlauf lokaler Änderungen als Snapshot-Historie ----
@@ -59,12 +62,14 @@
   function histReset() { histPrev = JSON.stringify(snapshot()); undoStack.length = 0; redoStack.length = 0; updateUndoUI(); }
   function applyHistState(json) {
     histPrev = json;
+    const keepLog = PLAN.changelog;        // Änderungsverlauf ist append-only – nicht mit zurückrollen
     applySnapshot(JSON.parse(json));
+    PLAN.changelog = keepLog;
     suppressHistory = true; saveLocal(); if (window.Cloud) Cloud.scheduleSave(snapshot()); suppressHistory = false;
     buildLegend(); render(); updateUndoUI();
   }
-  function undo() { if (!undoStack.length) return; redoStack.push(histPrev); applyHistState(undoStack.pop()); }
-  function redo() { if (!redoStack.length) return; undoStack.push(histPrev); applyHistState(redoStack.pop()); }
+  function undo() { if (!undoStack.length) return; logChange('Änderung rückgängig gemacht'); redoStack.push(histPrev); applyHistState(undoStack.pop()); }
+  function redo() { if (!redoStack.length) return; logChange('Änderung wiederholt'); undoStack.push(histPrev); applyHistState(redoStack.pop()); }
   function save() {
     ensureIds();   // neue Balken/Phasen bekommen stabile IDs vor dem Sync (fürs Zusammenführen)
     saveLocal();
@@ -81,6 +86,57 @@
     if (!raw) return;
     try { applySnapshot(JSON.parse(raw)); } catch (e) {}
   }
+
+  // ---- Änderungsverlauf (wer / was / wann) ----
+  // Geteilt über den Plan (Cloud-Merge vereinigt die Einträge). Nur bewusste Planungsaktionen werden
+  // protokolliert – nicht jedes Zwischenspeichern (z. B. Tippen im Monteur-Dialog).
+  PLAN.changelog = PLAN.changelog || [];
+  let logPanelOpen = false, logFilter = 'alle';
+  function currentUser() {
+    try { const a = window.Cloud && Cloud.account && Cloud.account(); if (a) return a; } catch (e) {}
+    return 'lokal';
+  }
+  function logChange(text, view) {
+    if (!text) return;
+    PLAN.changelog = PLAN.changelog || [];
+    PLAN.changelog.push({
+      id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+      ts: Date.now(),
+      user: currentUser(),
+      view: view || (viewMode === 'week' ? 'woche' : 'zeitplan'),
+      text: String(text),
+    });
+    if (PLAN.changelog.length > 500) PLAN.changelog.splice(0, PLAN.changelog.length - 500);
+    if (logPanelOpen) renderChangelog();
+  }
+  const wdLocal = (ts) => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][new Date(ts).getDay()];
+  const p2 = (n) => ('0' + n).slice(-2);
+  const hhmmTs = (ts) => { const d = new Date(ts); return p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+  const dayTs = (ts) => { const d = new Date(ts); return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + d.getFullYear(); };
+  const shortUser = (u) => { if (!u) return 'lokal'; const s = String(u); const i = s.indexOf('@'); return i > 0 ? s.slice(0, i) : s; };
+  function renderChangelog() {
+    const list = document.getElementById('hist-list'); if (!list) return;
+    const all = (PLAN.changelog || []).slice().sort((a, b) => b.ts - a.ts);
+    const items = all.filter(e => logFilter === 'alle' || e.view === logFilter);
+    const cnt = document.getElementById('hist-count');
+    if (cnt) cnt.textContent = items.length + ' Einträge' + (all.length !== items.length ? ' von ' + all.length : '');
+    list.innerHTML = '';
+    if (!items.length) { list.appendChild(el('div', 'hist-empty', 'Noch keine Änderungen protokolliert.')); return; }
+    let lastDay = '';
+    for (const e of items) {
+      const day = dayTs(e.ts);
+      if (day !== lastDay) { lastDay = day; list.appendChild(el('div', 'hist-day', wdLocal(e.ts) + ' · ' + day)); }
+      const rowEl = el('div', 'hist-row');
+      rowEl.appendChild(el('span', 'hist-time', hhmmTs(e.ts)));
+      rowEl.appendChild(el('span', 'hist-badge hb-' + (e.view || 'zeitplan'), e.view === 'woche' ? 'Woche' : 'Zeitplan'));
+      const usr = el('span', 'hist-user', shortUser(e.user)); usr.title = e.user || '';
+      rowEl.appendChild(usr);
+      rowEl.appendChild(el('span', 'hist-text', e.text));
+      list.appendChild(rowEl);
+    }
+  }
+  function openChangelog() { logPanelOpen = true; renderChangelog(); document.getElementById('hoverlay').hidden = false; }
+  function closeChangelog() { logPanelOpen = false; document.getElementById('hoverlay').hidden = true; }
 
   // ---- Tagesraster ----
   const days = [];
@@ -414,6 +470,9 @@
         addToPhase(ph, toId, toDate);
       }
     }
+    const proj = (names && names.length) ? names.join(', ') : 'Einsatz';
+    if (fromId === toId) logChange(`${proj}: ${monteurName(fromId)} von ${fmt(parse(fromDate))} auf ${fmt(parse(toDate))} verschoben`, 'woche');
+    else logChange(`${proj}: Übergabe von ${monteurName(fromId)} an ${monteurName(toId)} am ${fmt(parse(toDate))}`, 'woche');
     save();
   }
   // Verschiebt den GANZEN Einsatz (Montagebalken + alle Phasen + Zuordnungen) um die Tagesdifferenz.
@@ -448,6 +507,7 @@
             return { id: a.id, start: isoStr(rs), end: isoStr(re) };
           }).filter(Boolean);
         }
+        logChange(`Einsatz „${bar.label || nm}" (${nm}, ${monteurName(pid)}) verschoben → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}`, 'woche');
         save();
         return;   // nur den einen (getroffenen) Einsatz verschieben
       }
@@ -793,6 +853,9 @@
             }
             if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
           }
+          const rowNm = b._row.site || b._row.label, barNm = bar.label || '(ohne Bezeichnung)';
+          const verb = mode === 'move' ? 'verschoben' : 'Dauer geändert';
+          logChange(`Einsatz „${barNm}" (${rowNm}) ${verb} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}`, 'zeitplan');
           save(); render();
         }
       };
@@ -977,12 +1040,18 @@
         : undefined;
       delete bar.crew;
     }
+    const rowNm = row.site || row.label, barNm = bar.label || '(ohne Bezeichnung)';
+    const asgNames = (bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)).filter((v, i, a) => a.indexOf(v) === i).map(monteurName);
+    const who = asgNames.length ? ' · Monteure: ' + asgNames.join(', ') : '';
+    logChange(`Termin „${barNm}" (${rowNm}) ${current.isNew ? 'angelegt' : 'bearbeitet'} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}${who}`, 'zeitplan');
     save(); render(); closeEditor();
   };
   document.getElementById('f-delete').onclick = () => {
     if (!current) return;
+    const rowNm = current.row.site || current.row.label, barNm = current.bar.label || '(ohne Bezeichnung)';
     const i = current.row.bars.indexOf(current.bar);
     if (i >= 0) current.row.bars.splice(i, 1);
+    logChange(`Termin „${barNm}" (${rowNm}) gelöscht`, 'zeitplan');
     save(); render(); closeEditor();
   };
   document.getElementById('f-cancel').onclick = () => {
@@ -1475,7 +1544,12 @@
       const b = el('button', 'need-menu-item' + (busy ? ' busy' : ''));
       b.appendChild(el('span', null, m.name + (m.type === 'extern' ? ' (ext)' : '')));
       if (busy) b.appendChild(el('span', 'need-menu-busy', busy));
-      b.onclick = () => { addToPhase(ph, m.id, dISO); save(); closeNeedMenu(); renderWeek(); };
+      b.onclick = () => {
+        addToPhase(ph, m.id, dISO);
+        const pnm = row.site || row.label, tl = (TRADES()[trade] && TRADES()[trade].label) || trade || 'Gewerk';
+        logChange(`${m.name} zugeordnet: ${pnm} · ${tl} am ${fmt(parse(dISO))}`, 'woche');
+        save(); closeNeedMenu(); renderWeek();
+      };
       needMenu.appendChild(b);
     }
     document.body.appendChild(needMenu);
@@ -1632,12 +1706,17 @@
         cell.addEventListener('drop', (e) => {
           e.preventDefault(); cell.classList.remove('drop');
           let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
-          if (data.palette) { assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false }; save(); renderWeek(); }
+          if (data.palette) {
+            assignments[key] = { text: data.palette.text, type: data.palette.type, auto: false };
+            logChange(`Notiz „${data.palette.text}" gesetzt (${p.name}, ${fmt(ms)})`, 'woche');
+            save(); renderWeek();
+          }
           else if (data.noteMove) {
             // Manuelle Notiz auf diese Zelle verschieben (aus der Quellzelle entfernen)
             if (data.noteMove.fromKey !== key) {
               delete assignments[data.noteMove.fromKey];
               assignments[key] = { text: data.noteMove.text, type: data.noteMove.type, auto: false };
+              logChange(`Notiz „${data.noteMove.text}" verschoben → ${p.name}, ${fmt(ms)}`, 'woche');
               save(); renderWeek();
             }
           }
@@ -1709,6 +1788,7 @@
         place(bar.crew.assigned, bar.crew.start || bar.start, bar.crew.end || bar.end, name);
       }
     }
+    if (count) logChange(`Woche KW ${isoWeek(selMonday)} ${fillOnly ? 'vorbelegt' : 'aktualisiert'} (${count} Einträge)`, 'woche');
     save(); renderWeek();
     if (!count && fillOnly) alert('Keine zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan den Montage-Phasen Monteure zu (Fenster-Balken anklicken → Phase → Monteure), oder ziehe Baustellen aus der Palette in die Zellen.');
   }
@@ -1798,23 +1878,30 @@
     woverlay.hidden = false;
   }
   function closeCellEditor() { woverlay.hidden = true; curCell = null; curCellCtx = null; }
+  const cellPersonName = () => (curCellPerson && curCellPerson.name) || (curCellCtx && monteurName(curCellCtx.pid)) || '?';
   document.getElementById('w-save').onclick = () => {
     if (!curCell || !curCellCtx) return;
+    const who = cellPersonName(), day = fmt(parse(curCellCtx.dISO));
     if (wProjectDraft.length) {
       // Projekt-Einsätze: alte Tages-Zuordnungen ersetzen durch die Liste (eine oder mehrere Baustellen)
       delete assignments[curCell];
       removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
       for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (row) assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, e.gewerk); }
+      const proj = wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? (r.site || r.label) : '?'; }).join(', ');
+      logChange(`${who} am ${day} zugeordnet: ${proj}`, 'woche');
     } else {
       const text = wText.value.trim();
-      if (!text) delete assignments[curCell]; else assignments[curCell] = { text, type: wType.value, auto: false };
+      if (!text) { delete assignments[curCell]; logChange(`Eintrag entfernt (${who}, ${day})`, 'woche'); }
+      else { assignments[curCell] = { text, type: wType.value, auto: false }; logChange(`Notiz „${text}" gesetzt (${who}, ${day})`, 'woche'); }
     }
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-delete').onclick = () => {
+    const who = cellPersonName(), day = curCellCtx ? fmt(parse(curCellCtx.dISO)) : '';
     if (curCell) delete assignments[curCell];
     // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
     if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
+    logChange(`Eintrag gelöscht (${who}, ${day})`, 'woche');
     save(); renderWeek(); closeCellEditor();
   };
   // Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen – schnelles Kopieren, z. B. für Bauleiter
@@ -1839,6 +1926,20 @@
   woverlay.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeCellEditor();
     if (e.key === 'Enter') document.getElementById('w-save').click();
+  });
+
+  // ---- Änderungsverlauf: Dialog verdrahten ----
+  document.getElementById('historyBtn').onclick = () => openChangelog();
+  document.getElementById('h-close').onclick = () => closeChangelog();
+  const hoverlay = document.getElementById('hoverlay');
+  hoverlay.addEventListener('click', (e) => { if (e.target === hoverlay) closeChangelog(); });
+  hoverlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChangelog(); });
+  hoverlay.querySelectorAll('.hist-filter .btn').forEach(btn => {
+    btn.onclick = () => {
+      logFilter = btn.dataset.hfilter;
+      hoverlay.querySelectorAll('.hist-filter .btn').forEach(b => b.classList.toggle('active', b === btn));
+      renderChangelog();
+    };
   });
 
   // ---- Ansicht umschalten & Wochen-Navigation ----

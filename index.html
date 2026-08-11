@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=58">
+  <link rel="stylesheet" href="styles.css?v=59">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -29,6 +29,7 @@
         <button id="undoBtn" class="btn" title="Rückgängig (Strg+Z)" disabled>↶ Rückgängig</button>
         <button id="redoBtn" class="btn" title="Wiederholen (Strg+Umschalt+Z)" disabled>↷</button>
       </div>
+      <button id="historyBtn" class="btn" title="Änderungsverlauf: wer hat wann was geändert">🕘 Verlauf</button>
       <input id="search" class="search timeline-only" type="search" placeholder="Projekt / Montage suchen…">
       <div class="btn-group timeline-only">
         <button id="zoomOut" class="btn" title="Verkleinern">−</button>
@@ -221,9 +222,31 @@
       </div>
     </div>
   </div>
+
+  <!-- Änderungsverlauf (wer / was / wann) – geteilt über SharePoint -->
+  <div id="hoverlay" class="overlay" hidden>
+    <div class="dialog wide" role="dialog" aria-modal="true">
+      <h3>Änderungsverlauf</h3>
+      <div class="hist-bar">
+        <div class="btn-group hist-filter">
+          <button class="btn active" data-hfilter="alle">Alle</button>
+          <button class="btn" data-hfilter="zeitplan">Zeitplan</button>
+          <button class="btn" data-hfilter="woche">Woche</button>
+        </div>
+        <span class="spacer"></span>
+        <span id="hist-count" class="hist-count"></span>
+      </div>
+      <div id="hist-list" class="hist-list"></div>
+      <div class="dialog-actions">
+        <div class="spacer"></div>
+        <button id="h-close" class="btn primary">Schließen</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=58"></script>
-  <script src="cloud.js?v=58"></script>
-  <script src="app.js?v=58"></script>
+  <script src="data.js?v=59"></script>
+  <script src="cloud.js?v=59"></script>
+  <script src="app.js?v=59"></script>
 </body>
 </html>
