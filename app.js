@@ -408,6 +408,10 @@
       row.bars.some(b => (b.label || '').toLowerCase().includes(filter));
   }
   const monteurName = (id) => { const m = PLAN.team.find(t => t.id === id); return m ? m.name : id; };
+  // Personen, die ein zugeordneter Monteur mitbringt (Truppstärke). Externe Trupps zählen mit ihrer Stärke,
+  // interne Monteure als 1 Person. Grundlage der Bedarfs-Deckung ("(offen)" / fehlender Monteur).
+  const personCount = (id) => { const m = PLAN.team.find(t => t.id === id); return m ? Math.max(1, +m.size || 1) : 1; };
+  const sumPersons = (ids) => { let n = 0; ids.forEach(id => { n += personCount(id); }); return n; };
   const TRADES = () => PLAN.trades || {};
   // Kann der Monteur das Gewerk? Volle Sanitär-Qualifikation deckt auch kleine Sanitäranschlüsse ab.
   function qualifies(m, tradeKey) {
@@ -589,7 +593,7 @@
         const dow = new Date(d).getUTCDay();
         let open = false;
         if (dow !== 0 && dow !== 6) {
-          const have = new Set(ranges.filter(r => parse(r.start) <= d && parse(r.end) >= d).map(r => r.id)).size;
+          const have = sumPersons(new Set(ranges.filter(r => parse(r.start) <= d && parse(r.end) >= d).map(r => r.id)));
           open = have < need;
         }
         if (open) { const iso = isoStr(d); if (!cur) cur = { start: iso, end: iso }; else cur.end = iso; }
@@ -1476,7 +1480,7 @@
             if (parse(ph.start) > ms || parse(ph.end) < ms) continue;   // Phase an dem Tag nicht aktiv
             const iso = isoStr(ms);
             // Zugeordnete an dem Tag, aber faktisch weg (überschrieben oder im Urlaub) zählen NICHT als besetzt
-            const have = new Set(ranges.filter(r => parse(r.start) <= ms && parse(r.end) >= ms).map(r => r.id).filter(id => !unavailable(id, ms))).size;
+            const have = sumPersons(new Set(ranges.filter(r => parse(r.start) <= ms && parse(r.end) >= ms).map(r => r.id).filter(id => !unavailable(id, ms))));
             const open = need - have;
             if (open > 0) { days[isoStr(ms)] = open; anyOpen = true; }
           }
@@ -1514,7 +1518,7 @@
           // Wochenende nur zeigen, wenn dort tatsächlich ein (Wochenend-)Einsatz liegt – sonst keine Lücke melden.
           if (weekendDay && !phaseActive) { perDay.push(null); continue; }
           anyActive = true;
-          const n = ids.size;
+          const n = sumPersons(ids);   // Personen (inkl. Truppstärke), nicht nur Köpfe
           if (n === 0) anyGap = true;
           perDay.push(n);
         }
