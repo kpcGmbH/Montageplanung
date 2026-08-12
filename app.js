@@ -435,11 +435,26 @@
   // Wandelt einen alten Sammelbedarf (crew) verlustfrei in eine Phase um – Voraussetzung fürs taggenaue Bearbeiten.
   function phasesOf(bar) {
     if (bar.phases && bar.phases.length) return bar.phases;
-    if (bar.crew) {
+    // Nur einen Bedarf mit echtem Inhalt (Gewerk ODER zugeordnete Monteure) in eine Phase wandeln.
+    // Ein leerer Auto-Bedarf (nur Zeitfenster, kein Gewerk) bleibt Bedarf – KEIN Auto-Edelstahl.
+    if (bar.crew && (bar.crew.trade || (bar.crew.assigned || []).length)) {
       bar.phases = [{ trade: bar.crew.trade || 'edelstahl', start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, count: +bar.crew.count || 1, assigned: (bar.crew.assigned || []).slice() }];
       delete bar.crew; return bar.phases;
     }
     return [];
+  }
+  // Ziel-Phase für eine Zuordnung bestimmen: vorhandene Phase mit dem Gewerk, sonst neu anlegen –
+  // und einen leeren Auto-Bedarf mit GENAU DIESEM (gewählten) Gewerk materialisieren (kein Auto-Edelstahl).
+  function getOrCreatePhase(bar, tradeKey) {
+    tradeKey = tradeKey || 'edelstahl';
+    if (!(bar.phases && bar.phases.length) && bar.crew) {
+      bar.phases = [{ trade: tradeKey, start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, days: daysCount(bar.crew.start || bar.start, bar.crew.end || bar.end, false), weekend: false, count: +bar.crew.count || 1, assigned: (bar.crew.assigned || []).slice() }];
+      delete bar.crew; return bar.phases[0];
+    }
+    bar.phases = bar.phases || [];
+    let ph = bar.phases.find(p => (p.trade || 'edelstahl') === tradeKey);
+    if (!ph) { ph = { trade: tradeKey, start: bar.start, end: bar.end, days: daysCount(bar.start, bar.end, false), weekend: false, count: 1, assigned: [] }; bar.phases.push(ph); }
+    return ph;
   }
   // Entfernt Person an genau EINEM Tag aus einer Phase (splittet den Bereich bei Bedarf).
   function removeFromPhase(ph, id, dayISO) {
@@ -1534,7 +1549,10 @@
   function onNeedDocDown(e) { if (needMenu && !needMenu.contains(e.target)) closeNeedMenu(); }
   function openNeedPicker(cell, row, bar, idx, dISO, trade) {
     closeNeedMenu();
-    const ph = phasesOf(bar)[idx]; if (!ph) return;
+    // Phase mit definiertem Gewerk: direkt nutzen. Leerer Auto-Bedarf (kein Gewerk): erst beim
+    // Zuordnen materialisieren – dann mit dem Gewerk des gewählten Monteurs (nicht pauschal Edelstahl).
+    const ph = (trade && bar.phases && bar.phases[idx]) ? bar.phases[idx] : null;
+    if (!ph && !bar.crew) return;
     const t = TRADES()[trade] || { label: '(Gewerk offen)' };
     const ms = parse(dISO);
     needMenu = el('div', 'need-menu');
@@ -1549,8 +1567,10 @@
       b.appendChild(el('span', null, m.name + (m.type === 'extern' ? ' (ext)' : '')));
       if (busy) b.appendChild(el('span', 'need-menu-busy', busy));
       b.onclick = () => {
-        addToPhase(ph, m.id, dISO);
-        const pnm = row.site || row.label, tl = (TRADES()[trade] && TRADES()[trade].label) || trade || 'Gewerk';
+        const useTrade = trade || firstTradeOf(m);            // leerer Bedarf → Gewerk des Monteurs
+        const target = ph || getOrCreatePhase(bar, useTrade);
+        addToPhase(target, m.id, dISO);
+        const pnm = row.site || row.label, tl = (TRADES()[useTrade] && TRADES()[useTrade].label) || useTrade || 'Gewerk';
         logChange(`${m.name} zugeordnet: ${pnm} · ${tl} am ${fmt(parse(dISO))}`, 'woche');
         save(); closeNeedMenu(); renderWeek();
       };
