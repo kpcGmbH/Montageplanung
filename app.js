@@ -138,6 +138,15 @@
   function openChangelog() { logPanelOpen = true; renderChangelog(); document.getElementById('hoverlay').hidden = false; }
   function closeChangelog() { logPanelOpen = false; document.getElementById('hoverlay').hidden = true; }
 
+  // ---- Kopieren / Einfügen (Woche-Zelle, Person-Woche, Montagefenster) ----
+  let clip = null;   // { kind:'cell'|'personweek'|'bar', ... }
+  function toast(msg) {
+    let t = document.getElementById('toast');
+    if (!t) { t = el('div', 'toast'); t.id = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
   // ---- Tagesraster ----
   const days = [];
   for (let i = 0; i < totalDays; i++) {
@@ -1073,6 +1082,28 @@
     logChange(`Termin „${barNm}" (${rowNm}) gelöscht`, 'zeitplan');
     save(); render(); closeEditor();
   };
+  // Montagefenster duplizieren: Kopie direkt im Anschluss (gleiche Länge/Gewerke/Zuordnungen)
+  document.getElementById('f-duplicate').onclick = () => {
+    if (!current) return;
+    const { row, bar } = current;
+    const clone = JSON.parse(JSON.stringify(bar));
+    delete clone.bid;
+    const len = Math.round((parse(bar.end) - parse(bar.start)) / MS_DAY);
+    const ns = snapWorkday(isoStr(addDays(parse(bar.end), 1)));   // Kopie startet am nächsten Werktag nach dem Original
+    const delta = Math.round((parse(ns) - parse(bar.start)) / MS_DAY);
+    const sh = (iso) => isoStr(addDays(parse(iso), delta));
+    clone.start = ns; clone.end = isoStr(addDays(parse(ns), len));
+    (clone.phases || []).forEach(p => {
+      delete p.pid;
+      p.start = sh(p.start); p.end = sh(p.end);
+      p.assigned = (p.assigned || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+    });
+    if (clone.crew && clone.crew.start) { clone.crew.start = sh(clone.crew.start); clone.crew.end = sh(clone.crew.end || clone.crew.start); }
+    clone.label = bar.label ? bar.label + ' (Kopie)' : 'Kopie';
+    row.bars.push(clone);
+    logChange(`Montagefenster „${bar.label || ''}" (${row.site || row.label}) dupliziert → ${fmt(parse(clone.start))}–${fmt(parse(clone.end))}`, 'zeitplan');
+    save(); render(); closeEditor(); openEditor(row, clone, false);
+  };
   document.getElementById('f-cancel').onclick = () => {
     if (current && current.isNew) {
       const i = current.row.bars.indexOf(current.bar);
@@ -1583,6 +1614,54 @@
     setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
   }
 
+  // Kontextmenü an einer Personen-Namenszelle: ganze Woche (Mo–Fr) kopieren / einfügen
+  function openPersonMenu(x, y, p) {
+    closeNeedMenu();
+    needMenu = el('div', 'need-menu');
+    needMenu.appendChild(el('div', 'need-menu-head', p.name + ' · Woche'));
+    const copyBtn = el('button', 'need-menu-item'); copyBtn.appendChild(el('span', null, 'Woche kopieren (Mo–Fr)'));
+    copyBtn.onclick = () => { copyPersonWeek(p); closeNeedMenu(); };
+    needMenu.appendChild(copyBtn);
+    if (clip && clip.kind === 'personweek') {
+      const pasteBtn = el('button', 'need-menu-item'); pasteBtn.appendChild(el('span', null, 'Woche einfügen von ' + clip.fromName));
+      pasteBtn.onclick = () => { pastePersonWeek(p); closeNeedMenu(); };
+      needMenu.appendChild(pasteBtn);
+    }
+    document.body.appendChild(needMenu);
+    needMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - needMenu.offsetWidth - 8)) + 'px';
+    needMenu.style.top = (y + 4) + 'px';
+    setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
+  }
+  function copyPersonWeek(p) {
+    const der = weekDerived(), days = [];
+    for (let i = 0; i < 5; i++) {
+      const ms = addDays(selMonday, i), key = akey(p.id, isoStr(ms));
+      const d = der[key] || { projects: [] }, projects = [];
+      for (const name of d.projects) { const dp = derivedProjectOf(p.id, ms, [name]); if (dp.rowId) projects.push({ rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(p) }); }
+      const a = assignments[key];
+      days.push({ projects, note: (a && a.type !== 'baustelle') ? { text: a.text, type: a.type } : null });
+    }
+    clip = { kind: 'personweek', fromName: p.name, days };
+    toast('Woche von ' + p.name + ' kopiert – Rechtsklick auf Zielperson → „Woche einfügen"');
+  }
+  function pastePersonWeek(p) {
+    if (!clip || clip.kind !== 'personweek') return;
+    const der = weekDerived();
+    suppressHistory = true;
+    for (let i = 0; i < 5; i++) {
+      const ms = addDays(selMonday, i), dISO = isoStr(ms), key = akey(p.id, dISO);
+      const targetProjects = (der[key] || { projects: [] }).projects.slice();
+      removePersonDay(p.id, dISO, targetProjects);
+      delete assignments[key];
+      const day = clip.days[i] || { projects: [], note: null };
+      for (const e of day.projects) { const row = projRows().find(r => r.id === e.rowId); if (row) assignWeekProject(p.id, ms, row, e.gewerk); }
+      if (day.note) assignments[key] = { text: day.note.text, type: day.note.type, auto: false };
+    }
+    suppressHistory = false;
+    logChange(`Woche von ${clip.fromName} auf ${p.name} übertragen`, 'woche');
+    save(); renderWeek();
+  }
+
   function renderWeek() {
     const sl = 0, st = viewport.scrollTop;
     const dates = weekDates();
@@ -1673,7 +1752,8 @@
       }
       lastKind = p.kind;
       const nameCell = el('div', 'wk-name' + (p.kind === 'extern' ? ' extern' : ''), p.name);
-      nameCell.title = p.name + (p.kind === 'extern' ? ' (extern)' : '');
+      nameCell.title = p.name + (p.kind === 'extern' ? ' (extern)' : '') + '\nRechtsklick: Woche kopieren / einfügen';
+      nameCell.addEventListener('contextmenu', (e) => { e.preventDefault(); openPersonMenu(e.clientX, e.clientY, p); });
       grid.appendChild(nameCell);
       dates.forEach((ms, i) => {
         const dISO = isoStr(ms), key = akey(p.id, dISO);
@@ -1902,6 +1982,7 @@
     wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
     document.getElementById('w-delete').style.display = (assignments[key] || der.projects.length) ? '' : 'none';
+    document.getElementById('w-paste').hidden = !(clip && clip.kind === 'cell');   // Einfügen nur, wenn eine Zelle kopiert wurde
     woverlay.hidden = false;
   }
   function closeCellEditor() { woverlay.hidden = true; curCell = null; curCellCtx = null; }
@@ -1945,6 +2026,27 @@
     const who = cellPersonName();
     logChange(`${who}: auf ganze Woche übertragen${wProjectDraft.length ? ' · Einsatz' : ''}${text ? ' · Termin „' + text + '"' : ''}`, 'woche');
     save(); renderWeek(); closeCellEditor();
+  };
+  // Zelle kopieren: aktuellen Editor-Inhalt (Baustellen + Notiz) in die Zwischenablage
+  document.getElementById('w-copy').onclick = () => {
+    if (!curCellCtx) return;
+    const text = wText.value.trim();
+    clip = {
+      kind: 'cell',
+      projects: wProjectDraft.map(e => ({ rowId: e.rowId, gewerk: e.gewerk })),
+      note: text ? { text, type: wType.value } : null,
+    };
+    toast('Eintrag kopiert – Zielzelle öffnen und „Einfügen"');
+    closeCellEditor();
+  };
+  // Kopierten Eintrag in die aktuell geöffnete Zelle einfügen (Felder füllen + speichern)
+  document.getElementById('w-paste').onclick = () => {
+    if (!curCellCtx || !clip || clip.kind !== 'cell') return;
+    wProjectDraft = clip.projects.map(e => ({ rowId: e.rowId, gewerk: e.gewerk }));
+    renderProjRows();
+    if (clip.note) { wText.value = clip.note.text; wType.value = clip.note.type; }
+    else { wText.value = ''; }
+    document.getElementById('w-save').click();
   };
   document.getElementById('w-cancel').onclick = () => closeCellEditor();
   woverlay.addEventListener('click', (e) => { if (e.target === woverlay) closeCellEditor(); });

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=62">
+  <link rel="stylesheet" href="styles.css?v=63">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -97,6 +97,8 @@
       <div class="dialog-actions">
         <button id="w-delete" class="btn danger">Löschen</button>
         <button id="w-week" class="btn" title="Diesen Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen">Ganze Woche</button>
+        <button id="w-copy" class="btn" title="Diesen Eintrag kopieren – danach eine andere Zelle öffnen und „Einfügen"">Kopieren</button>
+        <button id="w-paste" class="btn" title="Kopierten Eintrag hier einfügen" hidden>Einfügen</button>
         <div class="spacer"></div>
         <button id="w-cancel" class="btn">Abbrechen</button>
         <button id="w-save" class="btn primary">Speichern</button>
@@ -216,6 +218,7 @@
       </fieldset>
       <div class="dialog-actions">
         <button id="f-delete" class="btn danger">Löschen</button>
+        <button id="f-duplicate" class="btn" title="Dieses Montagefenster als Kopie direkt danach einfügen">Duplizieren</button>
         <div class="spacer"></div>
         <button id="f-cancel" class="btn">Abbrechen</button>
         <button id="f-save" class="btn primary">Speichern</button>
@@ -245,8 +248,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=62"></script>
-  <script src="cloud.js?v=62"></script>
-  <script src="app.js?v=62"></script>
+  <script src="data.js?v=63"></script>
+  <script src="cloud.js?v=63"></script>
+  <script src="app.js?v=63"></script>
 </body>
 </html>

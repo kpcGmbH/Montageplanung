@@ -573,6 +573,15 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
   background: rgba(255,255,255,.85); padding: 0 2px; border-radius: 2px;
 }
 
+/* Kurze Einblendung (Kopieren/Einfügen) */
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px);
+  background: #2b2f33; color: #fff; padding: 9px 16px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25); z-index: 9999; opacity: 0; pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease; max-width: 90vw; text-align: center;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 /* Änderungsverlauf */
 .hist-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .hist-bar .spacer { flex: 1; }
