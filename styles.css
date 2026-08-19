@@ -292,6 +292,10 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
   font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px;
   background: rgba(255,255,255,.45); color: inherit;
 }
+/* Eingeklappte Zusammenfassung (Monteure / offener Bedarf) direkt am Balken */
+.bar > span.bar-sum { pointer-events: none; flex: 0 0 auto; margin-left: 5px; display: inline-flex; gap: 4px; align-items: center; }
+.bar-sum .bar-sum-m { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px; background: rgba(255,255,255,.55); color: inherit; }
+.bar-sum .bar-sum-open { font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 8px; background: #c0271c; color: #fff; }
 /* Monteur-Lanes unter dem Fenster: je zugeordnetem Monteur eine Zeile über seine Tage */
 .lane-seg {
   position: absolute; height: 13px; border-radius: 3px;

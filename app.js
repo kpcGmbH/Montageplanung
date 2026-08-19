@@ -35,6 +35,7 @@
   let viewMode = 'timeline';
   const hiddenCats = new Set();
   const collapsedSites = new Set();
+  let lanesCollapsed = true;   // Monteur-Zeilen unter den Fenstern standardmäßig eingeklappt (Gesamtüberblick)
   let assignments = {}; // Wochen-Einsatzplan: 'personId|YYYY-MM-DD' -> { text, type }
 
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
@@ -654,6 +655,25 @@
       track.appendChild(lab);
     });
   }
+  // Eingeklappt: kompakte Zusammenfassung der Monteur-Lanes direkt auf dem Fensterbalken.
+  function addLaneSummary(wb, lanes) {
+    if (!lanes || !lanes.length) return;
+    const names = [...new Set(lanes.filter(l => !l.open).map(l => l.name))];
+    const openTrades = [...new Set(lanes.filter(l => l.open).map(l => l.trade))];
+    const wrap = el('span', 'bar-sum');
+    if (names.length) {
+      const b = el('span', 'bar-sum-m', '👤' + names.length);
+      b.title = 'Zugeordnet: ' + names.join(', ');
+      wrap.appendChild(b);
+    }
+    if (openTrades.length) {
+      const shorts = openTrades.map(t => (TRADES()[t] && TRADES()[t].short) || '?').join('/');
+      const o = el('span', 'bar-sum-open', '⚠ ' + shorts);
+      o.title = 'Noch offener Bedarf: ' + openTrades.map(t => (TRADES()[t] && TRADES()[t].label) || t).join(', ');
+      wrap.appendChild(o);
+    }
+    if (wrap.childNodes.length) wb.appendChild(wrap);
+  }
 
   function buildBody(flags) {
     const body = el('div', 'body');
@@ -709,7 +729,8 @@
       const visBars = row.bars.filter(bar => !hiddenCats.has(effCat(row, bar)));
       const laneMap = new Map();
       for (const bar of visBars) laneMap.set(bar, phaseLanes(bar));
-      const bandH = (bar) => { const n = (laneMap.get(bar) || []).length; return n > 0 ? 28 + n * 15 : 26; };
+      const showLanes = !lanesCollapsed;
+      const bandH = (bar) => { const n = showLanes ? (laneMap.get(bar) || []).length : 0; return n > 0 ? 28 + n * 15 : 26; };
       // Stapel-Zuweisung (Intervall-Partitionierung): sich überlappende Balken kommen in verschiedene Etagen
       const stackMap = new Map();
       const laneEnds = [];
@@ -725,15 +746,17 @@
       for (const bar of visBars) stackH[stackMap.get(bar)] = Math.max(stackH[stackMap.get(bar)], bandH(bar));
       const stackY = []; let accY = 0;
       for (let k = 0; k < numStacks; k++) { stackY[k] = accY; accY += stackH[k] + 4; }
-      const lanes = Math.max(0, ...[...laneMap.values()].map(l => l.length));
+      const lanes = showLanes ? Math.max(0, ...[...laneMap.values()].map(l => l.length)) : 0;
       if (stacked) r.style.height = accY + 'px';
       else if (lanes > 0) r.style.height = (28 + lanes * 15) + 'px';
       for (const bar of visBars) {
         const wb = makeBar(row, bar, flags);
-        const bl = laneMap.get(bar) || [];
+        const bl = showLanes ? (laneMap.get(bar) || []) : [];
         if (bl.length) wb.style.height = '20px';   // Fenster kompakt halten, Lanes darunter
         const yBase = stacked ? stackY[stackMap.get(bar)] : 0;
         if (stacked) { wb.style.top = (yBase + 3) + 'px'; wb.style.height = '20px'; }
+        // Eingeklappt: kompakte Zusammenfassung (Monteure/offener Bedarf) direkt am Balken
+        if (!showLanes) addLaneSummary(wb, laneMap.get(bar) || []);
         track.appendChild(wb);
         renderLanes(track, row, bar, bl, yBase);
       }
@@ -2088,6 +2111,14 @@
   document.getElementById('zoomIn').onclick = () => { dayWidth = Math.min(48, dayWidth + 4); render(); };
   document.getElementById('zoomOut').onclick = () => { dayWidth = Math.max(6, dayWidth - 4); render(); };
   document.getElementById('today').onclick = () => scrollToToday();
+  function updateLanesToggle() {
+    const b = document.getElementById('toggleLanes'); if (!b) return;
+    b.textContent = (lanesCollapsed ? '▸' : '▾') + ' Monteure';
+    b.classList.toggle('active', !lanesCollapsed);
+    b.title = lanesCollapsed ? 'Monteur-Zeilen ausklappen (Details je Fenster)' : 'Monteur-Zeilen einklappen (Gesamtüberblick)';
+  }
+  document.getElementById('toggleLanes').onclick = () => { lanesCollapsed = !lanesCollapsed; updateLanesToggle(); render(); };
+  updateLanesToggle();
   document.getElementById('addProject').onclick = () => openProjectDialog(null);
   document.getElementById('addResource').onclick = () => openResourceDialog(null, 'resource');
   document.getElementById('search').oninput = (e) => { filter = e.target.value.trim().toLowerCase(); render(); };
