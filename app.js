@@ -36,6 +36,7 @@
   const hiddenCats = new Set();
   const collapsedSites = new Set();
   let lanesCollapsed = true;   // Monteur-Zeilen unter den Fenstern standardmäßig eingeklappt (Gesamtüberblick)
+  const collapsedGroups = new Set(['Ressourcen / Monteure', 'Bauleiter']);   // Gruppen standardmäßig eingeklappt
   let assignments = {}; // Wochen-Einsatzplan: 'personId|YYYY-MM-DD' -> { text, type }
 
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
@@ -794,10 +795,21 @@
       return r;
     }
 
-    function makeGroupRow(name) {
+    function makeGroupRow(name, collapsible, count) {
       const gr = el('div', 'group-row');
       gr.style.width = 'calc(var(--label-w) + ' + trackW + 'px)';
-      gr.appendChild(el('div', 'group-row-label', name));
+      const lbl = el('div', 'group-row-label');
+      if (collapsible) {
+        const collapsed = collapsedGroups.has(name);
+        lbl.classList.add('collapsible');
+        lbl.appendChild(el('span', 'group-toggle', collapsed ? '▸' : '▾'));
+        lbl.appendChild(document.createTextNode(' ' + name + (count ? '  (' + count + ')' : '')));
+        lbl.title = 'Klick: ' + (collapsed ? 'ausklappen' : 'einklappen');
+        lbl.onclick = () => { collapsed ? collapsedGroups.delete(name) : collapsedGroups.add(name); render(); };
+      } else {
+        lbl.textContent = name;
+      }
+      gr.appendChild(lbl);
       return gr;
     }
 
@@ -805,15 +817,18 @@
       const rows = group.rows.filter(matches);
       const isRes = group.name === 'Ressourcen / Monteure';
       if (!rows.length && !(isRes && PLAN.team.length)) continue;
-      body.appendChild(makeGroupRow(group.name));
+      // Team-Zeilen (nur bei Ressourcen) einmal aufbauen – auch für die Anzahl im Kopf
+      const teamRows = isRes ? PLAN.team.map(m => ({
+        _member: m, id: 'mon-' + m.id, label: m.name || '(ohne Name)',
+        capRole: m.type === 'extern' ? 'extern' : 'monteur',
+        bars: (m.bars = m.bars || [])
+      })).filter(matches) : [];
+      const collapsible = (group.name === 'Ressourcen / Monteure' || group.name === 'Bauleiter');
+      const count = isRes ? (teamRows.length + rows.length) : rows.length;
+      body.appendChild(makeGroupRow(group.name, collapsible, count));
+      if (collapsible && collapsedGroups.has(group.name)) { visible++; continue; }   // eingeklappt: Zeilen überspringen
       let idx = 0;
       if (isRes) {
-        // Eine Zeile pro Monteur aus der Liste (Team): intern = Urlaub, extern = Buchung/Truppstärke
-        const teamRows = PLAN.team.map(m => ({
-          _member: m, id: 'mon-' + m.id, label: m.name || '(ohne Name)',
-          capRole: m.type === 'extern' ? 'extern' : 'monteur',
-          bars: (m.bars = m.bars || [])
-        })).filter(matches);
         for (const tr of teamRows) { body.appendChild(makeRow(group, tr, idx++, false)); visible++; }
         // zusätzliche Datenzeilen (Steinacker, Schulungen, „nicht zugeordnet" …)
         for (const row of rows) { body.appendChild(makeRow(group, row, idx++, false)); visible++; }

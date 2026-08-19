@@ -216,6 +216,9 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
   font-weight: 700; font-size: 11px; letter-spacing: .5px;
   text-transform: uppercase; color: #5b6168; background: #e7eaee;
 }
+.group-row-label.collapsible { cursor: pointer; }
+.group-row-label.collapsible:hover { background: #dde1e6; color: var(--copper-dark); }
+.group-toggle { display: inline-block; width: 12px; color: var(--copper-dark); font-size: 9px; }
 .row { display: flex; height: var(--row-h); }
 .row:nth-child(even of .row) { background: var(--bg-alt); }
 .row .label {
