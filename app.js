@@ -1965,9 +1965,10 @@
     if (!count && fillOnly) alert('Keine zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan den Montage-Phasen Monteure zu (Fenster-Balken anklicken → Phase → Monteure), oder ziehe Baustellen aus der Palette in die Zellen.');
   }
   function scrollToToday() {
-    const todayIdx = dayIndex(todayMs(), startMs);
-    const labelW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--label-w'));
-    viewport.scrollLeft = Math.max(0, todayIdx * dayWidth - viewport.clientWidth / 2 + labelW);
+    // Ansicht BEGINNT mit der aktuellen Montagewoche (Montag linksbündig, 1 Tag Vorlauf) –
+    // nicht zentriert, sonst lägen mehrere vergangene Wochen links davor.
+    const mondayIdx = dayIndex(mondayMs(todayMs()), startMs);
+    viewport.scrollLeft = Math.max(0, mondayIdx * dayWidth - dayWidth);
   }
 
   // ---- Zellen-Editor (Wochenplan) ----
