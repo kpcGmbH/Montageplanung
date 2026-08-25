@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=65">
+  <link rel="stylesheet" href="styles.css?v=66">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -36,6 +36,7 @@
         <button id="zoomIn" class="btn" title="Vergrößern">+</button>
       </div>
       <button id="toggleLanes" class="btn timeline-only" title="Monteur-Zeilen unter den Fenstern ein-/ausklappen">▸ Monteure</button>
+      <button id="toggleArchive" class="btn timeline-only" title="Archivierte (abgeschlossene) Projekte ein-/ausblenden" hidden>Archiv</button>
       <button id="addProject" class="btn primary" title="Neue Projektzeile anlegen">+ Projekt</button>
       <button id="manageTeam" class="btn" title="Monteure verwalten">Monteure</button>
       <button id="addResource" class="btn" title="Ressourcen-Zeile anlegen (Urlaub, externe Trupps)">+ Ressource</button>
@@ -249,8 +250,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=65"></script>
-  <script src="cloud.js?v=65"></script>
-  <script src="app.js?v=65"></script>
+  <script src="data.js?v=66"></script>
+  <script src="cloud.js?v=66"></script>
+  <script src="app.js?v=66"></script>
 </body>
 </html>

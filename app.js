@@ -37,6 +37,8 @@
   const collapsedSites = new Set();
   let lanesCollapsed = true;   // Monteur-Zeilen unter den Fenstern standardmäßig eingeklappt (Gesamtüberblick)
   const collapsedGroups = new Set(['Ressourcen / Monteure', 'Bauleiter']);   // Gruppen standardmäßig eingeklappt
+  let scrollTodayPending = true;   // erster Zeitplan-Aufbau springt auf die aktuelle Woche
+  let showArchived = false;        // archivierte Projekte im Zeitplan mitanzeigen?
   let assignments = {}; // Wochen-Einsatzplan: 'personId|YYYY-MM-DD' -> { text, type }
 
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
@@ -205,10 +207,10 @@
   function seedCrew() {
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
-      for (const row of g.rows) for (const bar of row.bars) {
+      for (const row of g.rows) { if (row.archived) continue; for (const bar of row.bars) {
         if (bar.crew || (bar.phases && bar.phases.length) || bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
         bar.crew = { count: bar.cat === 'preplanning' ? 2 : 1, start: bar.start, end: bar.end, assigned: [] };
-      }
+      } }
     }
   }
   // Stabile IDs für Balken (bid) und Phasen (pid) – Voraussetzung fürs zuverlässige Zusammenführen (3-Wege-Merge).
@@ -299,7 +301,7 @@
     const jobs = [];
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
-      for (const r of g.rows) for (const bar of r.bars) {
+      for (const r of g.rows) { if (r.archived) continue; for (const bar of r.bars) {
         if (bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
         if (bar.phases && bar.phases.length) {
           // Gewerk-Phasen: jede Phase belegt ihre eigenen Arbeitstage mit ihrer Personenzahl (feste Lage)
@@ -325,7 +327,7 @@
         if (bar.crew.start) { need = slots.length; }  // konkreter Einsatz-Zeitraum (feste Lage)
         else { need = Math.min(+bar.crew.days || slots.length, slots.length); if (slots.length < (+bar.crew.days || 0)) infeasible.add(bar); } // Legacy: Arbeitstage im Fenster
         jobs.push({ bar, count, need, slots, slack: slots.length - need, x0 });
-      }
+      } }
     }
     // Engste Fenster zuerst verteilen
     jobs.sort((a, z) => (a.slack - z.slack) || (a.x0 - z.x0));
@@ -341,11 +343,14 @@
   function computeConflicts() {
     const byMonteur = {};
     const add = (id, s, e, bar) => { (byMonteur[id] = byMonteur[id] || []).push({ x0: dayIndex(parse(s), startMs), x1: dayIndex(parse(e), startMs), bar }); };
-    for (const g of PLAN.groups) for (const r of g.rows) for (const bar of r.bars) {
+    for (const g of PLAN.groups) for (const r of g.rows) {
+      if (r.archived) continue;
+      for (const bar of r.bars) {
       if (bar.phases && bar.phases.length) {
         for (const ph of bar.phases) for (const rg of assignedRanges(ph)) add(rg.id, rg.start, rg.end, bar);
       } else if (bar.crew) {
         for (const id of (bar.crew.assigned || [])) add(id, bar.crew.start || bar.start, bar.crew.end || bar.end, bar);
+      }
       }
     }
     const conflict = new Set();
@@ -485,7 +490,7 @@
     if (!covered) ph.assigned.push({ id, start: dayISO, end: dayISO });
     // count (geplante Truppstärke) bleibt unverändert – ein Tages-Handoff erhöht den Bedarf nicht
   }
-  const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows : []; };
+  const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows.filter(r => !r.archived) : []; };
   // Verschiebt einen Tages-Einsatz von (fromId, fromDate) auf (toId, toDate) und schreibt es in den Zeitplan zurück.
   function weekReassign(fromId, fromDate, toId, toDate, projectNames) {
     if (fromId === toId && fromDate === toDate) return;
@@ -687,7 +692,7 @@
       const isBauleiter = group.name === 'Bauleiter';
       const isTeam = !!row._member;
       const editable = isProjects || isResources || isBauleiter;
-      const r = el('div', 'row' + (idx % 2 ? ' alt' : ''));
+      const r = el('div', 'row' + (idx % 2 ? ' alt' : '') + (row.archived ? ' archived' : ''));
       const roleTag = row.capRole === 'extern' ? '  ⟂ extern'
         : (isResources && row.capRole === 'none') ? '  ⓘ keine Kapazität' : '';
       const label = el('div', 'label', row.label); label.title = row.label + roleTag + '  (Doppelklick: bearbeiten)';
@@ -704,6 +709,16 @@
           const ti = el('span', 'row-ti', '✉'); ti.title = 'Termineinladung erstellen';
           ti.onclick = (e) => { e.stopPropagation(); openTermineinladung(row); };
           label.appendChild(ti);
+          // Archivieren / Wiederherstellen (nach Projektabschluss)
+          const arch = el('span', 'row-arch', row.archived ? '↩' : '📦');
+          arch.title = row.archived ? 'Wiederherstellen (aus dem Archiv holen)' : 'Projekt archivieren (nach Abschluss ausblenden)';
+          arch.onclick = (e) => {
+            e.stopPropagation();
+            row.archived = !row.archived;
+            logChange(`Projekt „${row.site || row.label}" ${row.archived ? 'archiviert' : 'wiederhergestellt'}`, 'zeitplan');
+            save(); render();
+          };
+          label.appendChild(arch);
         }
         const del = el('span', 'row-del', '✕'); del.title = (isProjects ? (row.site ? 'Bereich' : 'Projekt') : isBauleiter ? 'Bauleiter' : 'Zeile') + ' löschen';
         del.onclick = (e) => {
@@ -777,6 +792,18 @@
       const add = el('span', 'site-add', '＋'); add.title = 'Bereich hinzufügen';
       add.onclick = (e) => { e.stopPropagation(); openProjectDialog(null, site); };
       label.appendChild(add);
+      // Ganze Baustelle archivieren / wiederherstellen (alle Bereiche mit diesem Site-Namen)
+      const siteAll = group.rows.filter(x => x.site === site);
+      const allArch = siteAll.length && siteAll.every(x => x.archived);
+      const arch = el('span', 'row-arch', allArch ? '↩' : '📦');
+      arch.title = allArch ? 'Baustelle wiederherstellen' : 'Baustelle archivieren (alle Bereiche)';
+      arch.onclick = (e) => {
+        e.stopPropagation();
+        siteAll.forEach(x => { x.archived = !allArch; });
+        logChange(`Baustelle „${site}" ${allArch ? 'wiederhergestellt' : 'archiviert'} (${siteAll.length} Bereiche)`, 'zeitplan');
+        save(); render();
+      };
+      label.appendChild(arch);
       const track = el('div', 'track site-track'); track.style.width = trackW + 'px';
       let min = Infinity, max = -Infinity;
       for (const a of areas) for (const b of a.bars) {
@@ -814,7 +841,8 @@
     }
 
     for (const group of PLAN.groups) {
-      const rows = group.rows.filter(matches);
+      // Archivierte Projekte nur zeigen, wenn der Archiv-Schalter aktiv ist
+      const rows = group.rows.filter(r => matches(r) && (showArchived || !r.archived));
       const isRes = group.name === 'Ressourcen / Monteure';
       if (!rows.length && !(isRes && PLAN.team.length)) continue;
       // Team-Zeilen (nur bei Ressourcen) einmal aufbauen – auch für die Anzahl im Kopf
@@ -1439,7 +1467,7 @@
 
   // ---- Render & Steuerung ----
   const viewport = document.getElementById('viewport');
-  function render() { viewMode === 'week' ? renderWeek() : renderTimeline(); }
+  function render() { viewMode === 'week' ? renderWeek() : renderTimeline(); if (typeof updateArchiveToggle === 'function') updateArchiveToggle(); }
   function renderTimeline() {
     document.documentElement.style.setProperty('--dw', dayWidth + 'px');
     const sl = viewport.scrollLeft, st = viewport.scrollTop;
@@ -1456,6 +1484,8 @@
     viewport.innerHTML = '';
     viewport.appendChild(sheet);
     viewport.scrollLeft = sl; viewport.scrollTop = st;
+    // Beim ersten Aufbau (auch nach dem Laden der Cloud-Daten) auf die aktuelle Woche springen.
+    if (scrollTodayPending) { scrollTodayPending = false; requestAnimationFrame(scrollToToday); }
   }
 
   // ================= WOCHEN-EINSATZPLAN =================
@@ -2134,6 +2164,16 @@
   }
   document.getElementById('toggleLanes').onclick = () => { lanesCollapsed = !lanesCollapsed; updateLanesToggle(); render(); };
   updateLanesToggle();
+  function archivedCount() { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows.filter(r => r.archived).length : 0; }
+  function updateArchiveToggle() {
+    const b = document.getElementById('toggleArchive'); if (!b) return;
+    const n = archivedCount();
+    b.hidden = (n === 0 && !showArchived);   // Button nur zeigen, wenn es Archiv gibt (oder gerade aktiv)
+    b.textContent = (showArchived ? '▾ ' : '') + 'Archiv' + (n ? ' (' + n + ')' : '');
+    b.classList.toggle('active', showArchived);
+    b.title = showArchived ? 'Archivierte Projekte ausblenden' : 'Archivierte (abgeschlossene) Projekte anzeigen';
+  }
+  document.getElementById('toggleArchive').onclick = () => { showArchived = !showArchived; updateArchiveToggle(); render(); };
   document.getElementById('addProject').onclick = () => openProjectDialog(null);
   document.getElementById('addResource').onclick = () => openResourceDialog(null, 'resource');
   document.getElementById('search').oninput = (e) => { filter = e.target.value.trim().toLowerCase(); render(); };
@@ -2224,7 +2264,12 @@
   const gateHint = document.getElementById('gateHint');
   const gateLoginBtn = document.getElementById('gateLogin');
   const gateErr = document.getElementById('gateErr');
-  function revealApp() { document.body.classList.add('authed'); scrollToToday(); }
+  function revealApp() {
+    document.body.classList.add('authed');
+    // App ist jetzt sichtbar (Breite bekannt) → zuverlässig auf die aktuelle Woche springen
+    scrollTodayPending = false;
+    requestAnimationFrame(scrollToToday);
+  }
   function showGateLogin() {
     document.body.classList.remove('authed');
     const inPopup = !!(window.Cloud && Cloud.inPopup && Cloud.inPopup());
@@ -2278,6 +2323,7 @@
     // Stand aus der Cloud anwenden (Erststand ODER Hintergrund-Merge). Bei Merge bleibt der Undo-Verlauf bestehen.
     Cloud.onApply((data, mode) => {
       applySnapshot(data); migrateTeamResources(); seedCrew(); ensureIds();
+      if (mode !== 'merge') scrollTodayPending = true;   // Erststand aus der Cloud → auf aktuelle Woche springen
       saveLocal(); buildLegend(); render();
       if (mode === 'merge') updateUndoUI(); else histReset();
       revealApp();

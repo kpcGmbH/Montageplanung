@@ -267,6 +267,20 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 }
 .row:hover .row-del { opacity: .55; }
 .row-del:hover { opacity: 1; background: #fdecea; }
+/* Archivieren / Wiederherstellen */
+.row-arch {
+  position: absolute; right: 22px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 15px; line-height: 15px; text-align: center;
+  font-size: 11px; border-radius: 3px; cursor: pointer; opacity: 0; transition: opacity .1s;
+}
+.row:hover .row-arch { opacity: .6; }
+.row-arch:hover { opacity: 1; background: #e7dccf; }
+.row.archived .row-arch { opacity: .85; }
+.row.site-header .row-arch { right: 24px; opacity: .5; }
+.row.site-header .row-arch:hover { opacity: 1; }
+/* Archivierte Zeile dezent ausgrauen (nur sichtbar, wenn Archiv eingeblendet) */
+.row.archived .label { color: #9aa0a6; font-style: italic; }
+.row.archived .bar { opacity: .5; filter: grayscale(.4); }
 .row.alt .label { background: var(--bg-alt); }
 .track {
   position: relative; flex: 0 0 auto;
