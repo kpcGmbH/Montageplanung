@@ -870,6 +870,9 @@
             blk.areas.push(row);
           } else blocks.push({ row });
         }
+        // „Kleinprojekte" (Sammelzeile) immer ans Ende der Projektliste anheften
+        const isKlein = (blk) => !blk.site && /kleinprojekt/i.test((blk.row && blk.row.label) || '');
+        blocks.sort((a, b) => (isKlein(a) ? 1 : 0) - (isKlein(b) ? 1 : 0));
         for (const blk of blocks) {
           if (blk.site) {
             body.appendChild(makeSiteHeader(group, blk.site, blk.areas)); visible++;
