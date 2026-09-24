@@ -206,12 +206,13 @@
   }
   function seedCrew() {
     // KEIN automatischer Personalbedarf mehr: Ein Fenster ohne gewählte Phase bleibt ohne Personen.
-    // Alt-Daten: verwaisten Auto-Bedarf (crew OHNE Gewerk UND OHNE zugeordnete Monteure) entfernen,
-    // damit an leeren Terminen nicht länger „2 Personen" auftauchen.
+    // Alt-Daten: jeden Auto-/Alt-Bedarf OHNE zugeordnete Monteure entfernen (auch mit Gewerk),
+    // damit an leeren Terminen nicht länger „2 Personen" auftauchen. Bedarfe MIT zugeordneten
+    // Monteuren (echte Alt-Zuordnungen) bleiben unangetastet.
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
       for (const row of g.rows) for (const bar of (row.bars || [])) {
-        if (bar.crew && !bar.crew.trade && !((bar.crew.assigned || []).length)) delete bar.crew;
+        if (bar.crew && !((bar.crew.assigned || []).length)) delete bar.crew;
       }
     }
   }
