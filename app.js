@@ -205,12 +205,14 @@
     return ph;
   }
   function seedCrew() {
+    // KEIN automatischer Personalbedarf mehr: Ein Fenster ohne gewählte Phase bleibt ohne Personen.
+    // Alt-Daten: verwaisten Auto-Bedarf (crew OHNE Gewerk UND OHNE zugeordnete Monteure) entfernen,
+    // damit an leeren Terminen nicht länger „2 Personen" auftauchen.
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
-      for (const row of g.rows) { if (row.archived) continue; for (const bar of row.bars) {
-        if (bar.crew || (bar.phases && bar.phases.length) || bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
-        bar.crew = { count: bar.cat === 'preplanning' ? 2 : 1, start: bar.start, end: bar.end, assigned: [] };
-      } }
+      for (const row of g.rows) for (const bar of (row.bars || [])) {
+        if (bar.crew && !bar.crew.trade && !((bar.crew.assigned || []).length)) delete bar.crew;
+      }
     }
   }
   // Stabile IDs für Balken (bid) und Phasen (pid) – Voraussetzung fürs zuverlässige Zusammenführen (3-Wege-Merge).
@@ -737,7 +739,7 @@
         const s = isoStr(ms);
         const bar = (row.capRole === 'extern' || row.capRole === 'monteur')
           ? { start: s, end: s, label: '', cat: row.capRole === 'extern' ? 'booking' : 'vacation' }
-          : { start: s, end: s, label: '', cat: 'preplanning', crew: { count: 1, days: 1, assigned: [] } };
+          : { start: s, end: s, label: '', cat: 'preplanning' };   // kein Auto-Personalbedarf – Personen erst über eine Phase
         row.bars.push(bar);
         openEditor(row, bar, true);
       });
