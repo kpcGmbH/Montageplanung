@@ -1888,8 +1888,9 @@
         } else if (der.urlaub) {
           type = 'urlaub'; text = 'frei';
         } else if (proj.length > 1) {
-          // Geteilter Tag: Person an mehreren Baustellen – gültig, kein Fehler
-          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; split = true; text = proj.join(' / '); title = proj.length + ' Baustellen an diesem Tag: ' + proj.join(', ');
+          // Mehrere Baustellen an einem Tag. Bei Monteuren „geteilter Tag" (blau gestreift); bei
+          // Bauleitern bleibt es einfarbig violett (mehrere Baustellen sind für die Bauleitung normal).
+          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; split = (p.kind !== 'bauleiter'); text = proj.join(' / '); title = proj.length + ' Baustellen an diesem Tag: ' + proj.join(', ');
         } else if (proj.length === 1) {
           type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; text = proj[0]; title = (p.kind === 'bauleiter' ? 'Bauleitung: ' : '') + proj[0];
           if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
