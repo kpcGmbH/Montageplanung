@@ -313,6 +313,7 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .bar > span.bar-sum { pointer-events: none; flex: 0 0 auto; margin-left: 5px; display: inline-flex; gap: 4px; align-items: center; }
 .bar-sum .bar-sum-m { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px; background: rgba(255,255,255,.55); color: inherit; }
 .bar-sum .bar-sum-open { font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 8px; background: #c0271c; color: #fff; }
+.bar-sum .bar-sum-bl { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px; background: #7e57c2; color: #fff; }
 /* Monteur-Lanes unter dem Fenster: je zugeordnetem Monteur eine Zeile über seine Tage */
 .lane-seg {
   position: absolute; height: 13px; border-radius: 3px;
