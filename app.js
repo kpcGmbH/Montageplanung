@@ -1888,10 +1888,10 @@
         } else if (der.urlaub) {
           type = 'urlaub'; text = 'frei';
         } else if (proj.length > 1) {
-          // Geteilter Tag: Monteur an mehreren Baustellen – gültig, kein Fehler
-          type = 'baustelle'; split = true; text = proj.join(' / '); title = proj.length + ' Baustellen an diesem Tag: ' + proj.join(', ');
+          // Geteilter Tag: Person an mehreren Baustellen – gültig, kein Fehler
+          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; split = true; text = proj.join(' / '); title = proj.length + ' Baustellen an diesem Tag: ' + proj.join(', ');
         } else if (proj.length === 1) {
-          type = 'baustelle'; text = proj[0]; title = proj[0];
+          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; text = proj[0]; title = (p.kind === 'bauleiter' ? 'Bauleitung: ' : '') + proj[0];
           if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
         }
         const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : '') + (split ? ' wk-split' : ''));
@@ -1904,7 +1904,8 @@
         }
         if (title) cell.title = title;
         // Baustellen-Einsatz (aus dem Zeitplan) lässt sich taggenau auf eine andere Person/einen anderen Tag ziehen
-        if (proj.length && !note && !der.urlaub) {
+        // (nur Monteure – Bauleitung wird nicht per Gewerk-Phase verschoben)
+        if (proj.length && !note && !der.urlaub && p.kind !== 'bauleiter') {
           cell.draggable = true;
           const pj = proj.slice(), fd = dISO, fid = p.id;
           cell.addEventListener('dragstart', (e) => { cell.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ move: { fromId: fid, fromDate: fd, projects: pj } })); });
@@ -2130,7 +2131,7 @@
       if (dp.rowId) wProjectDraft.push(curCellIsBl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(person) });
     }
     renderProjRows();
-    wType.value = note ? note.type : CELL_TYPE_DEFAULT;
+    wType.value = note ? note.type : (curCellIsBl ? 'bauleitung' : CELL_TYPE_DEFAULT);   // Bauleiter: Standardtyp Bauleitung (nicht Montage)
     // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
     const blank = !note && !der.projects.length && !der.urlaub;
     wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
