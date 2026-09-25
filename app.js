@@ -75,6 +75,7 @@
   function undo() { if (!undoStack.length) return; logChange('Änderung rückgängig gemacht'); redoStack.push(histPrev); applyHistState(undoStack.pop()); }
   function redo() { if (!redoStack.length) return; logChange('Änderung wiederholt'); undoStack.push(histPrev); applyHistState(redoStack.pop()); }
   function save() {
+    pruneEmptyWeekBars();   // leere Woche-Fragmente entfernen
     ensureIds();   // neue Balken/Phasen bekommen stabile IDs vor dem Sync (fürs Zusammenführen)
     saveLocal();
     const snap = snapshot(), json = JSON.stringify(snap);
@@ -1106,6 +1107,7 @@
   document.getElementById('f-save').onclick = () => {
     if (!current) return;
     const { row, bar } = current;
+    delete bar.weekgen;   // manuell bearbeitet → als echtes Fenster behandeln (nicht mehr als Woche-Fragment auto-aufräumen)
     bar.label = fLabel.value.trim();
     let s = fStart.value || bar.start, e = fEnd.value || bar.end;
     if (parse(e) < parse(s)) e = s;
@@ -2012,14 +2014,43 @@
   // Person an einem Tag einem Projekt/Gewerk zuordnen (schreibt in den Zeitplan)
   function assignWeekProject(pid, ms, row, gewerk) {
     const dISO = isoStr(ms);
-    let bar = row.bars.find(b => parse(b.start) <= ms && parse(b.end) >= ms);
-    if (!bar) { bar = { label: 'Montage', cat: 'confirmed', start: dISO, end: dISO, phases: [] }; row.bars.push(bar); }
+    const isEinsatz = (b) => b.cat !== 'vacation' && b.cat !== 'booking';
+    // 1) Bereits ein Fenster, das den Tag abdeckt?
+    let bar = row.bars.find(b => parse(b.start) <= ms && parse(b.end) >= ms && isEinsatz(b));
+    if (!bar) {
+      // 2) Angrenzendes, per Woche erzeugtes Fenster (endet am Vortag ODER beginnt am Folgetag) → erweitern,
+      //    damit aus mehreren Tagen EIN zusammenhängendes Montagefenster wird statt 1-Tages-Fragmenten.
+      const dayBefore = isoStr(addDays(ms, -1)), dayAfter = isoStr(addDays(ms, 1));
+      bar = row.bars.find(b => b.weekgen && (b.end === dayBefore || b.start === dayAfter));
+      if (bar) {
+        if (bar.end === dayBefore) bar.end = dISO; else bar.start = dISO;
+      } else {
+        bar = { label: 'Montage', cat: 'confirmed', start: dISO, end: dISO, phases: [], weekgen: true };
+        row.bars.push(bar);
+      }
+    }
     if (bar.crew) { if ((bar.crew.assigned || []).length || bar.crew.trade) phasesOf(bar); else delete bar.crew; }
     if (!bar.phases) bar.phases = [];
+    const weekendDay = [0, 6].includes(new Date(ms).getUTCDay());
     let ph = bar.phases.find(p => (p.trade || 'edelstahl') === gewerk);
-    if (!ph) { ph = { trade: gewerk, start: bar.start, end: bar.end, count: 1, assigned: [] }; bar.phases.push(ph); }
+    if (!ph) { ph = { trade: gewerk, start: bar.start, end: bar.end, days: 1, weekend: weekendDay, count: 1, assigned: [] }; bar.phases.push(ph); }
+    else {
+      // Phasenfenster an das (evtl. erweiterte) Balkenfenster anpassen und days konsistent halten
+      if (parse(bar.start) < parse(ph.start)) ph.start = bar.start;
+      if (parse(bar.end) > parse(ph.end)) ph.end = bar.end;
+      if (weekendDay) ph.weekend = true;
+    }
+    ph.days = daysCount(ph.start, ph.end, !!ph.weekend);
     addToPhase(ph, pid, dISO);
     save();
+  }
+  // Leere, per Woche erzeugte Montagefenster (kein Monteur mehr zugeordnet) entfernen – keine Fragmente.
+  function pruneEmptyWeekBars() {
+    const g = PLAN.groups.find(x => x.name === 'Projekte'); if (!g) return;
+    for (const row of g.rows) {
+      if (!row.bars) continue;
+      row.bars = row.bars.filter(b => !(b.weekgen && !(b.phases || []).some(p => (p.assigned || []).length)));
+    }
   }
   // Typ gewählt → Textfeld passend füllen (wenn leer oder ein Standardtext), damit der Eintrag speicherbar ist
   wType.addEventListener('change', () => {
