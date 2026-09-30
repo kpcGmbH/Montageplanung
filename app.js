@@ -1848,8 +1848,8 @@
           if (open) {
             cell.textContent = open + '×' + (t.short ? ' ' + t.short : '');
             cell.style.setProperty('--need-col', t.color);
-            cell.title = t.label + ' – ' + open + ' Monteur' + (open > 1 ? 'e' : '') + ' offen (' + nd.name + ') · klicken zum Zuordnen';
-            cell.addEventListener('click', () => openNeedPicker(cell, nd.row, nd.bar, nd.idx, dISO, nd.trade));
+            cell.title = t.label + ' – ' + open + ' Monteur' + (open > 1 ? 'e' : '') + ' offen (' + nd.name + ') · klicken zum Bearbeiten';
+            cell.addEventListener('click', () => openEditor(nd.row, nd.bar, false));   // volle Editor-Maske wie im Zeitplan
           }
           grid.appendChild(cell);
         });
