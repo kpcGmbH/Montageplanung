@@ -1768,7 +1768,13 @@
     for (let i = 0; i < 5; i++) {
       const ms = addDays(selMonday, i), key = akey(p.id, isoStr(ms));
       const d = der[key] || { projects: [] }, projects = [];
-      for (const name of d.projects) { const dp = derivedProjectOf(p.id, ms, [name]); if (dp.rowId) projects.push(dp.bl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(p) }); }
+      for (const name of d.projects) { const dp = derivedProjectOf(p.id, ms, [name]); if (!dp.rowId) continue;
+        const e = dp.bl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(p) };
+        // Kleinprojekt: Bezeichnung der Montage mitnehmen, damit die Zielperson im selben Fenster landet
+        const krow = projRows().find(r => r.id === dp.rowId), kb = (krow && isKleinRow(krow)) ? barOfPersonDay(krow, p.id, ms) : null;
+        if (kb) e.label = kb.label || '';
+        projects.push(e);
+      }
       const a = assignments[key];
       days.push({ projects, note: (a && a.type !== 'baustelle') ? { text: a.text, type: a.type } : null });
     }
@@ -1785,7 +1791,7 @@
       removePersonDay(p.id, dISO, targetProjects);
       delete assignments[key];
       const day = clip.days[i] || { projects: [], note: null };
-      for (const e of day.projects) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (e.bl) assignBauleitung(p.id, ms, row); else assignWeekProject(p.id, ms, row, e.gewerk); }
+      for (const e of day.projects) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (e.bl) assignBauleitung(p.id, ms, row, e); else assignWeekProject(p.id, ms, row, e.gewerk, e); }
       if (day.note) assignments[key] = { text: day.note.text, type: day.note.type, auto: false };
     }
     suppressHistory = false;
@@ -2064,7 +2070,7 @@
       const rowEl = el('div', 'w-proj-row');
       const psel = document.createElement('select');
       for (const r of projRows()) { const o = el('option', null, r.site ? (r.site + ' · ' + r.label) : r.label); o.value = r.id; psel.appendChild(o); }
-      psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; renderProjRows(); };
+      psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; delete entry.bar; entry.label = ''; renderProjRows(); };
       rowEl.appendChild(psel);
       if (!curCellIsBl) {   // Gewerk-Auswahl nur bei Monteuren
         const gsel = document.createElement('select'); gsel.className = 'w-proj-gewerk';
@@ -2074,7 +2080,7 @@
       }
       // Termineinladung: Kleinprojekt → für die Montage dieses Tages, sonst der Projekt-Entwurf
       const tiRow = projRows().find(r => r.id === entry.rowId);
-      const tiBarW = (tiRow && isKleinRow(tiRow) && curCellCtx) ? barOfPersonDay(tiRow, curCellCtx.pid, parse(curCellCtx.dISO)) : null;
+      const tiBarW = (tiRow && isKleinRow(tiRow)) ? (entry.bar || null) : null;   // neue, ungespeicherte Montage: noch kein Fenster
       if (tiRow && (!isKleinRow(tiRow) || tiBarW)) {
         const ti = el('span', 'w-proj-ti', '✉');
         ti.title = 'Termineinladung erstellen' + (tiBarW && tiBarW.label ? ' · ' + tiBarW.label : '') + '\n(nicht gespeicherte Änderungen in dieser Maske gehen verloren)';
@@ -2085,6 +2091,14 @@
       del.onclick = () => { wProjectDraft.splice(i, 1); renderProjRows(); };
       rowEl.appendChild(del);
       wProjects.appendChild(rowEl);
+      // Kleinprojekte (Sammelzeile): Bezeichnung der einzelnen Montage – steht in der Woche statt „Kleinprojekte"
+      if (tiRow && isKleinRow(tiRow)) {
+        const lab = document.createElement('input'); lab.type = 'text'; lab.className = 'w-proj-label';
+        lab.placeholder = 'Bezeichnung des Kleinprojekts (z. B. Kunde / Ort)';
+        lab.title = 'Bezeichnung dieser Montage – gilt für das ganze Montagefenster im Zeitplan';
+        lab.value = entry.label || ''; lab.oninput = () => { entry.label = lab.value; };
+        wProjects.appendChild(lab);
+      }
     });
     document.querySelector('#w-proj-section label').firstChild.textContent = curCellIsBl ? 'Baustelle(n) an diesem Tag (Bauleitung) ' : 'Baustellen an diesem Tag ';
     // Notiz-/Termin-Feld bleibt immer sichtbar – ein manueller Termin kann NEBEN dem Einsatz stehen.
@@ -2109,10 +2123,30 @@
     }
     return bar;
   }
+  // Kleinprojekte: je Bezeichnung ein eigenes Fenster. Erst das Fenster des Eintrags (falls es den Tag
+  // abdeckt), sonst ein gleichnamiges am Tag, sonst ein angrenzendes gleichnamiges Woche-Fenster erweitern, sonst neu.
+  function kleinBarFor(row, ms, entry) {
+    const label = (entry.label || '').trim();
+    const origin = (entry.bar && row.bars.indexOf(entry.bar) >= 0) ? entry.bar : null;
+    if (!label && !origin) return weekBarFor(row, ms);
+    const dISO = isoStr(ms), want = (label || origin.label || '').toLowerCase();
+    const covers = (b) => parse(b.start) <= ms && parse(b.end) >= ms;
+    const same = (b) => b.cat !== 'vacation' && b.cat !== 'booking' && (b.label || '').trim().toLowerCase() === want;
+    if (origin && covers(origin)) return origin;
+    let bar = row.bars.find(b => same(b) && covers(b));
+    if (!bar) {
+      const dayBefore = isoStr(addDays(ms, -1)), dayAfter = isoStr(addDays(ms, 1));
+      bar = row.bars.find(b => b.weekgen && same(b) && (b.end === dayBefore || b.start === dayAfter));
+      if (bar) { if (bar.end === dayBefore) bar.end = dISO; else bar.start = dISO; }
+      else { bar = { label: label || origin.label || 'Montage', cat: 'confirmed', start: dISO, end: dISO, phases: [], weekgen: true }; row.bars.push(bar); }
+    }
+    return bar;
+  }
+  const weekEntryBar = (row, ms, entry) => (entry && isKleinRow(row)) ? kleinBarFor(row, ms, entry) : weekBarFor(row, ms);
   // Person an einem Tag einem Projekt/Gewerk zuordnen (schreibt in den Zeitplan)
-  function assignWeekProject(pid, ms, row, gewerk) {
+  function assignWeekProject(pid, ms, row, gewerk, entry) {
     const dISO = isoStr(ms);
-    const bar = weekBarFor(row, ms);
+    const bar = weekEntryBar(row, ms, entry);
     if (bar.crew) { if ((bar.crew.assigned || []).length || bar.crew.trade) phasesOf(bar); else delete bar.crew; }
     if (!bar.phases) bar.phases = [];
     const weekendDay = [0, 6].includes(new Date(ms).getUTCDay());
@@ -2129,8 +2163,8 @@
     save();
   }
   // Bauleiter an einem Tag einer Baustelle zuordnen (Bauleitung – ohne Gewerk; schreibt in den Zeitplan)
-  function assignBauleitung(blId, ms, row) {
-    const bar = weekBarFor(row, ms);
+  function assignBauleitung(blId, ms, row, entry) {
+    const bar = weekEntryBar(row, ms, entry);
     addToBl(bar, blId, isoStr(ms));
     save();
   }
@@ -2170,6 +2204,17 @@
     wProjectDraft = [];
     for (const name of der.projects) {
       const dp = derivedProjectOf(person.id, ms, [name]);
+      const krow = dp.rowId ? projRows().find(r => r.id === dp.rowId) : null;
+      if (krow && isKleinRow(krow)) {
+        // Sammelzeile: je Montage (Fenster), in der die Person an dem Tag steht, ein eigener Eintrag mit Bezeichnung
+        const on = (r) => r.id === person.id && parse(r.start) <= ms && parse(r.end) >= ms;
+        for (const b of krow.bars) {
+          if (curCellIsBl) { if (blRanges(b).some(on)) wProjectDraft.push({ rowId: krow.id, bl: true, bar: b, label: b.label || '' }); continue; }
+          for (const ph of (b.phases || [])) if (assignedRanges(ph).some(on))
+            wProjectDraft.push({ rowId: krow.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b, label: b.label || '' });
+        }
+        if (wProjectDraft.some(e => e.rowId === krow.id)) continue;
+      }
       if (dp.rowId) wProjectDraft.push(curCellIsBl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(person) });
     }
     renderProjRows();
@@ -2184,14 +2229,27 @@
   }
   function closeCellEditor() { woverlay.hidden = true; curCell = null; curCellCtx = null; }
   const cellPersonName = () => (curCellPerson && curCellPerson.name) || (curCellCtx && monteurName(curCellCtx.pid)) || '?';
+  // Geänderte Bezeichnung eines Kleinprojekts auf sein Montagefenster schreiben (gilt für alle dort Eingeplanten)
+  function renameKleinBars() {
+    const out = [];
+    for (const e of wProjectDraft) {
+      const label = (e.label || '').trim();
+      if (!e.bar || !label || label === (e.bar.label || '')) continue;
+      out.push(`Bezeichnung „${e.bar.label || ''}" → „${label}"`);
+      e.bar.label = label;
+    }
+    return out;
+  }
   document.getElementById('w-save').onclick = () => {
     if (!curCell || !curCellCtx) return;
     const who = cellPersonName(), day = fmt(parse(curCellCtx.dISO));
     const parts = [];
     // 1) Baustellen des Tages neu setzen (leer = alle für den Tag entfernen). Bauleiter → Bauleitung, sonst Einsatz.
+    const renamed = renameKleinBars();
     removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
-    for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, parse(curCellCtx.dISO), row); else assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, e.gewerk); }
-    if (wProjectDraft.length) parts.push((curCellIsBl ? 'Bauleitung: ' : 'Einsatz: ') + wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? (r.site || r.label) : '?'; }).join(', '));
+    for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, parse(curCellCtx.dISO), row, e); else assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, e.gewerk, e); }
+    for (const t of renamed) parts.push(t);
+    if (wProjectDraft.length) parts.push((curCellIsBl ? 'Bauleitung: ' : 'Einsatz: ') + wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? ((isKleinRow(r) && (e.label || '').trim()) || r.site || r.label) : '?'; }).join(', '));
     else if (curCellCtx.projects.length) parts.push(curCellIsBl ? 'Bauleitung entfernt' : 'Einsatz entfernt');
     // 2) Manueller Termin/Notiz – UNABHÄNGIG vom Einsatz (beide können nebeneinander stehen).
     //    Reinen Auto-Standardtext (z. B. „Montage") NICHT als Notiz neben einer Baustelle speichern.
@@ -2216,10 +2274,11 @@
     let text = wText.value.trim();
     if (wProjectDraft.length && CELL_TYPE_TEXT_SET.has(text)) text = '';   // Auto-Standardtext nicht mitschreiben
     if (!wProjectDraft.length && !text) { alert('Bitte zuerst einen Text eingeben oder ein Projekt wählen, das auf die ganze Woche übertragen werden soll.'); return; }
+    renameKleinBars();
     for (let i = 0; i < 5; i++) {
       const ms = addDays(selMonday, i);
       // Baustellen auf jeden Werktag übertragen (Bauleiter → Bauleitung, sonst Einsatz)
-      for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, ms, row); else assignWeekProject(curCellCtx.pid, ms, row, e.gewerk); }
+      for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, ms, row, e); else assignWeekProject(curCellCtx.pid, ms, row, e.gewerk, e); }
       // Manuellen Termin/Notiz zusätzlich auf jeden Werktag übertragen
       if (text) assignments[akey(curCellCtx.pid, isoStr(ms))] = { text, type: wType.value, auto: false };
     }
@@ -2233,7 +2292,7 @@
     const text = wText.value.trim();
     clip = {
       kind: 'cell',
-      projects: wProjectDraft.map(e => ({ rowId: e.rowId, gewerk: e.gewerk })),
+      projects: wProjectDraft.map(e => ({ rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' })),
       note: text ? { text, type: wType.value } : null,
     };
     toast('Eintrag kopiert – Zielzelle öffnen und „Einfügen"');
@@ -2242,7 +2301,7 @@
   // Kopierten Eintrag in die aktuell geöffnete Zelle einfügen (Felder füllen + speichern)
   document.getElementById('w-paste').onclick = () => {
     if (!curCellCtx || !clip || clip.kind !== 'cell') return;
-    wProjectDraft = clip.projects.map(e => ({ rowId: e.rowId, gewerk: e.gewerk }));
+    wProjectDraft = clip.projects.map(e => ({ rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }));
     renderProjRows();
     if (clip.note) { wText.value = clip.note.text; wType.value = clip.note.type; }
     else { wText.value = ''; }
