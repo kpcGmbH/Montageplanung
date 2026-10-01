@@ -231,7 +231,10 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
   padding: 0 8px; font-size: 11.5px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.row:hover .label { background: #fff7ef; }
+/* Ganze Zeile beim Überfahren hervorheben (hilft, die Zeile über die Zeitachse zu verfolgen) */
+.row:hover,
+.row:nth-child(even of .row):hover { background: #fbeacf; }
+.row:hover .label { background: #f7e2bf; }
 .label.editable { padding-right: 18px; }
 .label.row-info { color: #8a8f96; font-style: italic; }
 .label.res-extern { color: #1f97ad; }
