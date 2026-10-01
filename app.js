@@ -621,8 +621,13 @@
     }
     if (row.capRole === 'extern')
       b.appendChild(el('span', 'badge', `${(+bar.size || (row._member && +row._member.size) || 1)} P`));
-    b.appendChild(el('div', 'h h-l'));
-    b.appendChild(el('div', 'h h-r'));
+    // Resize-Randgriffe nur bei ausreichend breiten Balken – sonst deckten sie den ganzen Balken ab
+    // und das Verschieben (Mitte greifen) wäre nicht möglich. Schmale Balken: Größe über den Editor ändern.
+    const barW = Math.max((x1 - x0 + 1) * dayWidth - 2, dayWidth - 2);
+    if (barW >= 28) {
+      b.appendChild(el('div', 'h h-l'));
+      b.appendChild(el('div', 'h h-r'));
+    }
     const crewTxt = bar.crew && bar.crew.count
       ? `\nBedarf: ${bar.crew.count} Monteure · ${bar.crew.start ? fmt(parse(bar.crew.start)) + '–' + fmt(parse(bar.crew.end || bar.crew.start)) : (bar.crew.days || 0) + ' Arbeitstage'}`
         + (reqTrade ? `\nGewerk: ${reqTrade.label}` : '')
