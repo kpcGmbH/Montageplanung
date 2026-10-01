@@ -2051,19 +2051,35 @@
   for (const key of Object.keys(CELL_TYPES)) { const o = el('option', null, CELL_TYPES[key].label); o.value = key; wType.appendChild(o); }
   const firstTradeOf = (person) => (person && (person.trades || []).find(k => TRADES()[k])) || Object.keys(TRADES())[0] || 'edelstahl';
   // Baustellen-Liste (mehrere Projekt-Einsätze je Person/Tag möglich). Bei Bauleitern: nur Baustelle, kein Gewerk.
+  // Montagefenster einer Projektzeile, in dem die Person an dem Tag eingeplant ist (sonst das Fenster des Tages)
+  function barOfPersonDay(row, pid, ms) {
+    const on = (r) => r.id === pid && parse(r.start) <= ms && parse(r.end) >= ms;
+    const bars = row.bars || [];
+    return bars.find(b => (b.phases || []).some(ph => assignedRanges(ph).some(on)) || blRanges(b).some(on))
+      || bars.find(b => parse(b.start) <= ms && parse(b.end) >= ms) || null;
+  }
   function renderProjRows() {
     wProjects.innerHTML = '';
     wProjectDraft.forEach((entry, i) => {
       const rowEl = el('div', 'w-proj-row');
       const psel = document.createElement('select');
       for (const r of projRows()) { const o = el('option', null, r.site ? (r.site + ' · ' + r.label) : r.label); o.value = r.id; psel.appendChild(o); }
-      psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; };
+      psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; renderProjRows(); };
       rowEl.appendChild(psel);
       if (!curCellIsBl) {   // Gewerk-Auswahl nur bei Monteuren
         const gsel = document.createElement('select'); gsel.className = 'w-proj-gewerk';
         for (const k of Object.keys(TRADES())) { const o = el('option', null, TRADES()[k].label); o.value = k; gsel.appendChild(o); }
         gsel.value = entry.gewerk; gsel.onchange = () => { entry.gewerk = gsel.value; };
         rowEl.appendChild(gsel);
+      }
+      // Termineinladung: Kleinprojekt → für die Montage dieses Tages, sonst der Projekt-Entwurf
+      const tiRow = projRows().find(r => r.id === entry.rowId);
+      const tiBarW = (tiRow && isKleinRow(tiRow) && curCellCtx) ? barOfPersonDay(tiRow, curCellCtx.pid, parse(curCellCtx.dISO)) : null;
+      if (tiRow && (!isKleinRow(tiRow) || tiBarW)) {
+        const ti = el('span', 'w-proj-ti', '✉');
+        ti.title = 'Termineinladung erstellen' + (tiBarW && tiBarW.label ? ' · ' + tiBarW.label : '') + '\n(nicht gespeicherte Änderungen in dieser Maske gehen verloren)';
+        ti.onclick = () => { closeCellEditor(); openTermineinladung(tiRow, tiBarW); };
+        rowEl.appendChild(ti);
       }
       const del = el('span', 'w-proj-del', '✕'); del.title = 'Baustelle entfernen';
       del.onclick = () => { wProjectDraft.splice(i, 1); renderProjRows(); };
