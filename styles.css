@@ -234,7 +234,8 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 /* Ganze Zeile beim Überfahren hervorheben (hilft, die Zeile über die Zeitachse zu verfolgen) */
 .row:hover,
 .row:nth-child(even of .row):hover { background: #fbeacf; }
-.row:hover .label { background: #f7e2bf; }
+.row:hover .label,
+.row.alt:hover .label { background: #f7e2bf; }   /* auch graue (alt) Zeilen beim Hover tönen */
 .label.editable { padding-right: 18px; }
 .label.row-info { color: #8a8f96; font-style: italic; }
 .label.res-extern { color: #1f97ad; }
