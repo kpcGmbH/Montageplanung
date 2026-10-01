@@ -2030,12 +2030,13 @@
     save(); renderWeek();
     if (!count && fillOnly) alert('Keine zugeordneten Monteure in dieser Woche gefunden.\nOrdne im Zeitplan den Montage-Phasen Monteure zu (Fenster-Balken anklicken → Phase → Monteure), oder ziehe Baustellen aus der Palette in die Zellen.');
   }
-  function scrollToToday() {
-    // Ansicht BEGINNT mit der aktuellen Montagewoche (Montag linksbündig, 1 Tag Vorlauf) –
+  function scrollToWeek(monday) {
+    // Ansicht BEGINNT mit dieser Montagewoche (Montag linksbündig, 1 Tag Vorlauf) –
     // nicht zentriert, sonst lägen mehrere vergangene Wochen links davor.
-    const mondayIdx = dayIndex(mondayMs(todayMs()), startMs);
+    const mondayIdx = dayIndex(monday, startMs);
     viewport.scrollLeft = Math.max(0, mondayIdx * dayWidth - dayWidth);
   }
+  function scrollToToday() { scrollToWeek(mondayMs(todayMs())); }
 
   // ---- Zellen-Editor (Wochenplan) ----
   const woverlay = document.getElementById('woverlay');
@@ -2250,6 +2251,7 @@
 
   // ---- Ansicht umschalten & Wochen-Navigation ----
   function setView(mode) {
+    const fromWeek = viewMode === 'week' && mode === 'timeline';
     viewMode = mode;
     document.getElementById('viewTimeline').classList.toggle('active', mode === 'timeline');
     document.getElementById('viewWeek').classList.toggle('active', mode === 'week');
@@ -2257,6 +2259,8 @@
     document.getElementById('weekbar').hidden = mode !== 'week';
     document.querySelectorAll('.timeline-only').forEach(elm => { elm.style.display = mode === 'week' ? 'none' : ''; });
     render();
+    // Zurück aus der Woche: Zeitplan auf die dort gezeigte Woche stellen (statt an den Planbeginn zu springen)
+    if (fromWeek) { scrollTodayPending = false; requestAnimationFrame(() => scrollToWeek(selMonday)); }
   }
   document.getElementById('viewTimeline').onclick = () => setView('timeline');
   document.getElementById('viewWeek').onclick = () => setView('week');
