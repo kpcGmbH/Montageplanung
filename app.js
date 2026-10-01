@@ -1603,11 +1603,16 @@
     return [{ text: 'Montage', type: 'montage' }, { text: 'Bauleitung', type: 'bauleitung' }, { text: 'IBN', type: 'ibn' }, { text: 'Kundendienst', type: 'kundendienst' }, { text: 'Büro', type: 'buero' }, { text: 'n.v.', type: 'nv' }, { text: 'frei', type: 'urlaub' }];
   }
 
+  // „Kleinprojekte" ist eine Sammelzeile: in der Woche zählt die Bezeichnung der einzelnen Montage,
+  // nicht der Zeilentitel. `projects` bleibt der Zeilenname (Schlüssel für Verschieben/Bearbeiten).
+  const isKleinRow = (row) => !!row && !row.site && /kleinprojekt/i.test(row.label || '');
+  const weekName = (row, bar) => (isKleinRow(row) && bar && bar.label) ? bar.label : (row.site || row.label);
+
   // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
   // Urlaub (interne Vacation-Balken) und Buchung (externe). Basis für Doppelbuchungs-Anzeige.
   function weekDerived() {
     const map = {};
-    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], urlaub: false, booking: false, unconfirmed: false }); };
+    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], labels: [], urlaub: false, booking: false, unconfirmed: false }); };
     const eachWorkday = (s, e, cb) => {
       for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
     };
@@ -1619,15 +1624,16 @@
     if (proj) for (const row of proj.rows) {
       const name = row.site || row.label;
       for (const bar of row.bars) {
+        const shown = weekName(row, bar);
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
         const unconf = effCat(row, bar) === 'preplanning';   // „Vorplanung / nicht bestätigt"
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (unconf) c.unconfirmed = true; });
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (unconf) c.unconfirmed = true; });
         }
       }
     }
@@ -1655,7 +1661,7 @@
             const open = need - have;
             if (open > 0) { days[isoStr(ms)] = open; anyOpen = true; }
           }
-          if (anyOpen) out.push({ name, trade: ph.trade || '', row, bar, idx, days });
+          if (anyOpen) out.push({ name: weekName(row, bar), trade: ph.trade || '', row, bar, idx, days });
         });
       }
     }
@@ -1693,7 +1699,7 @@
           if (n === 0) anyGap = true;
           perDay.push(n);
         }
-        if (anyActive) out.push({ name: row.site || row.label, sub: bar.label || '', perDay, anyGap, row, bar });
+        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, anyGap, row, bar });
       }
     }
     return out;
@@ -1885,27 +1891,28 @@
         const der = derived[key] || { projects: [], urlaub: false, booking: false };
         const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
         const proj = der.projects;
+        const disp = (der.labels && der.labels.length) ? der.labels : proj;   // Anzeige (Kleinprojekte: Bezeichnung der Montage)
         let text = '', type = '', conflict = false, title = '', unconfirmed = false, override = false, split = false, extra = '', extraType = '';
         const noteAbsence = note && ABSENCE_TYPES.has(note.type);
         if (note && proj.length && !noteAbsence) {
           // Kombinierter Tag: geplanter Einsatz UND manueller Termin bleiben beide bestehen (z. B. nur anteilig).
-          type = 'baustelle'; split = proj.length > 1;
-          text = proj.join(' / '); extra = note.text; extraType = note.type;
+          type = 'baustelle'; split = disp.length > 1;
+          text = disp.join(' / '); extra = note.text; extraType = note.type;
           if (der.unconfirmed) unconfirmed = true;
-          title = 'Geplanter Einsatz: ' + proj.join(', ') + '\n+ Termin: ' + note.text + '\n(gleicher Tag – evtl. nur anteilig; beide bleiben bestehen)';
+          title = 'Geplanter Einsatz: ' + disp.join(', ') + '\n+ Termin: ' + note.text + '\n(gleicher Tag – evtl. nur anteilig; beide bleiben bestehen)';
         } else if (note) {
           text = note.text; type = note.type;
-          if (proj.length) { conflict = true; override = true; title = 'Überschreibt geplanten Einsatz: ' + proj.join(', ') + ' → dieser Einsatz ist jetzt offener Bedarf. (manuell hier: „' + note.text + '")'; }
+          if (proj.length) { conflict = true; override = true; title = 'Überschreibt geplanten Einsatz: ' + disp.join(', ') + ' → dieser Einsatz ist jetzt offener Bedarf. (manuell hier: „' + note.text + '")'; }
         } else if (der.urlaub && proj.length) {
-          conflict = true; type = 'nv'; text = 'frei + ' + proj.join(', '); title = 'Konflikt: als frei markiert, aber Einsatz geplant (' + proj.join(', ') + ')';
+          conflict = true; type = 'nv'; text = 'frei + ' + disp.join(', '); title = 'Konflikt: als frei markiert, aber Einsatz geplant (' + disp.join(', ') + ')';
         } else if (der.urlaub) {
           type = 'urlaub'; text = 'frei';
-        } else if (proj.length > 1) {
+        } else if (disp.length > 1) {
           // Mehrere Baustellen an einem Tag. Bei Monteuren „geteilter Tag" (blau gestreift); bei
           // Bauleitern bleibt es einfarbig violett (mehrere Baustellen sind für die Bauleitung normal).
-          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; split = (p.kind !== 'bauleiter'); text = proj.join(' / '); title = proj.length + ' Baustellen an diesem Tag: ' + proj.join(', ');
-        } else if (proj.length === 1) {
-          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; text = proj[0]; title = (p.kind === 'bauleiter' ? 'Bauleitung: ' : '') + proj[0];
+          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; split = (p.kind !== 'bauleiter'); text = disp.join(' / '); title = disp.length + ' Baustellen an diesem Tag: ' + disp.join(', ');
+        } else if (proj.length) {
+          type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; text = disp[0]; title = (p.kind === 'bauleiter' ? 'Bauleitung: ' : '') + disp[0];
           if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
         }
         const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : '') + (split ? ' wk-split' : ''));
