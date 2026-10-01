@@ -1827,7 +1827,11 @@
       for (const s of sites) {
         const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : ''));
         if (s.anyGap) { const w = el('span', 'wk-warn', '⚠'); nameCell.appendChild(w); }
-        nameCell.appendChild(document.createTextNode(s.name + (s.sub ? ' · ' + s.sub : '')));
+        nameCell.appendChild(el('span', 'wk-site-text', s.name + (s.sub ? ' · ' + s.sub : '')));
+        // Termineinladung: Kleinprojekt → je Montage (eigener Entwurf), sonst der Projekt-Entwurf wie im Zeitplan
+        const ti = el('span', 'wk-ti', '✉'); ti.title = 'Termineinladung erstellen';
+        ti.addEventListener('click', (e) => { e.stopPropagation(); openTermineinladung(s.row, isKleinRow(s.row) ? s.bar : null); });
+        nameCell.appendChild(ti);
         nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist kein Monteur eingeplant.' : '') + '\nKlick: Einsatz bearbeiten';
         nameCell.addEventListener('click', () => openEditor(s.row, s.bar, false));
         grid.appendChild(nameCell);
@@ -2360,6 +2364,7 @@
     tiProject = row; tiBar = bar || null;
     tiTitle.textContent = 'Termineinladung · ' + ((bar && bar.label) || row.site || row.label || '');
     tiStatus.textContent = '';
+    document.getElementById('tiBack').textContent = viewMode === 'week' ? '← Zurück zur Woche' : '← Zurück zum Zeitplan';
     tiView.hidden = false;
     if (!tiFrame.getAttribute('src')) tiFrame.setAttribute('src', TI_SRC);  // lädt einmal → sendet ti-ready
     else tiSendInit();

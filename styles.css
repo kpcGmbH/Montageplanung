@@ -447,6 +447,9 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .wk-name.wk-site-name:hover { background: #f0f6ea; }
 .wk-name.wk-site-name.wk-site-gap { color: #a12b1e; }
 .wk-warn { flex: 0 0 auto; }
+.wk-site-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wk-ti { flex: 0 0 auto; color: var(--copper); opacity: .55; padding: 0 2px; font-size: 13px; }
+.wk-ti:hover { opacity: 1; }
 .wk-cell.wk-site-cell { cursor: pointer; font-weight: 700; font-size: 11px; }
 .wk-cell.wk-site-ok { background: color-mix(in srgb, #62a92f 16%, #fff); color: #33600f; border: 1px solid color-mix(in srgb, #62a92f 45%, #fff); outline-offset: -1px; }
 .wk-cell.wk-site-nostaff {
