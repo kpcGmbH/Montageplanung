@@ -1119,6 +1119,7 @@
     document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Montage-Phasen nur bei Projekten
     document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
+    document.getElementById('f-ti').style.display = (isExtern || isMonteur) ? 'none' : '';          // Termineinladung nur bei Projekt-Montagen
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     // Phasen laden – bestehender Sammelbedarf (crew) wird verlustfrei als erste Phase übernommen
     const cloneAssigned = (arr) => (arr || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: a.start, end: a.end }));
@@ -1214,6 +1215,13 @@
     row.bars.push(clone);
     logChange(`Montagefenster „${bar.label || ''}" (${row.site || row.label}) dupliziert → ${fmt(parse(clone.start))}–${fmt(parse(clone.end))}`, 'zeitplan');
     save(); render(); closeEditor(); openEditor(row, clone, false);
+  };
+  // Termineinladung für genau diese Montage (nützlich bei „Kleinprojekte" mit vielen Einzelmontagen)
+  document.getElementById('f-ti').onclick = () => {
+    if (!current) return;
+    const { row, bar } = current;
+    closeEditor();
+    openTermineinladung(row, bar);
   };
   document.getElementById('f-cancel').onclick = () => {
     if (current && current.isNew) {
@@ -2304,34 +2312,42 @@
   const tiFrame = document.getElementById('tiFrame');
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
-  let tiProject = null, tiReady = false;
+  let tiProject = null, tiBar = null, tiReady = false;
   const TI_SRC = 'termineinladung.html?v=46';
-  function tiDraftName(row) {
-    const base = ((row.nummer ? row.nummer + ' ' : '') + (row.site || row.label || ''))
+  function tiDraftName(row, bar) {
+    const name = bar ? (bar.label || row.site || row.label || '') : (row.site || row.label || '');
+    const base = ((row.nummer ? row.nummer + ' ' : '') + name)
       .replace(/[^0-9A-Za-zÄÖÜäöüß ._-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
-    return (base || 'projekt') + '__' + row.id + '.json';
+    const barKey = bar ? '__' + String(bar.bid || bar.start || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
+    return (base || 'projekt') + '__' + row.id + barKey + '.json';
   }
-  function tiPrefill(row) {
-    const bars = (row.bars || []).slice().sort((a, b) => parse(a.start) - parse(b.start));
-    let datum = '', zeitraum = '';
-    if (bars.length) { const b = bars[0]; if (b.start === b.end) datum = b.start; else zeitraum = fmt(parse(b.start)) + '–' + fmt(parse(b.end)); }
-    return { objektname: row.site || row.label || '', projektnummer: row.nummer || '', ort: row.ort || '', datum, zeitraum };
+  function tiPrefill(row, bar) {
+    let datum = '', zeitraum = '', objektname = row.site || row.label || '';
+    if (bar) {
+      // Einzelne Montage (z. B. ein Kleinprojekt): Bezeichnung + Zeitraum aus dem Balken
+      objektname = bar.label || objektname;
+      if (bar.start === bar.end) datum = bar.start; else zeitraum = fmt(parse(bar.start)) + '–' + fmt(parse(bar.end));
+    } else {
+      const bars = (row.bars || []).slice().sort((a, b) => parse(a.start) - parse(b.start));
+      if (bars.length) { const b = bars[0]; if (b.start === b.end) datum = b.start; else zeitraum = fmt(parse(b.start)) + '–' + fmt(parse(b.end)); }
+    }
+    return { objektname, projektnummer: row.nummer || '', ort: row.ort || '', datum, zeitraum };
   }
   async function tiSendInit() {
     if (!tiProject || !tiReady || !tiFrame.contentWindow) return;
     let state = null;
     if (window.Cloud && Cloud.isReady()) {
       tiStatus.textContent = 'lade Zwischenstand …';
-      try { state = await Cloud.loadDraft(tiDraftName(tiProject)); } catch (e) { /* kein Draft / offline */ }
+      try { state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar)); } catch (e) { /* kein Draft / offline */ }
     }
     tiStatus.textContent = state ? 'Zwischenstand geladen'
       : (window.Cloud && Cloud.isReady()) ? 'neu · aus Projektdaten vorbefüllt'
       : 'nicht angemeldet – kein SharePoint-Speichern';
-    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id, prefill: tiPrefill(tiProject), state: state || null }, '*');
+    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : ''), prefill: tiPrefill(tiProject, tiBar), state: state || null }, '*');
   }
-  function openTermineinladung(row) {
-    tiProject = row;
-    tiTitle.textContent = 'Termineinladung · ' + (row.site || row.label || '');
+  function openTermineinladung(row, bar) {
+    tiProject = row; tiBar = bar || null;
+    tiTitle.textContent = 'Termineinladung · ' + ((bar && bar.label) || row.site || row.label || '');
     tiStatus.textContent = '';
     tiView.hidden = false;
     if (!tiFrame.getAttribute('src')) tiFrame.setAttribute('src', TI_SRC);  // lädt einmal → sendet ti-ready
@@ -2345,10 +2361,10 @@
     else if (m.type === 'ti-save') {
       if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, '*'); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
       tiStatus.textContent = 'speichere …';
-      try { await Cloud.saveDraft(tiDraftName(tiProject), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
+      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
       catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, '*'); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
     }
-    else if (m.type === 'ti-reset') { tiFrame.contentWindow.postMessage({ type: 'ti-init', prefill: tiPrefill(tiProject), state: null }, '*'); }
+    else if (m.type === 'ti-reset') { tiFrame.contentWindow.postMessage({ type: 'ti-init', prefill: tiPrefill(tiProject, tiBar), state: null }, '*'); }
   });
 
   // ---- Cloud-Sync (Microsoft-Login + SharePoint), optional ----
