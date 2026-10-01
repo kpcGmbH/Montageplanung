@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=84">
+  <link rel="stylesheet" href="styles.css?v=85">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -180,6 +180,14 @@
       <label id="p-nr-wrap">Projektnummer
         <input id="p-nr" type="text" placeholder="z. B. 1095">
       </label>
+      <div class="row2">
+        <label style="flex:2">Straße + Nr.
+          <input id="p-strasse" type="text" placeholder="z. B. Hauptstraße 12">
+        </label>
+        <label>PLZ
+          <input id="p-plz" type="text" inputmode="numeric" placeholder="z. B. 65185">
+        </label>
+      </div>
       <label id="p-ort-wrap">Ort
         <input id="p-ort" type="text" placeholder="z. B. Wiesbaden">
       </label>
@@ -202,6 +210,16 @@
       <label>Bezeichnung
         <input id="f-label" type="text" placeholder="z. B. Montage Küche">
       </label>
+      <div id="f-addr-wrap">
+        <label>Adresse der Baustelle
+          <input id="f-strasse" type="text" placeholder="Straße + Nr.">
+        </label>
+        <div class="row2">
+          <label>PLZ <input id="f-plz" type="text" inputmode="numeric"></label>
+          <label style="flex:2">Ort <input id="f-ort" type="text"></label>
+        </div>
+      </div>
+      <datalist id="kleinList"></datalist>
       <label id="f-cat-wrap">Kategorie
         <select id="f-cat"></select>
       </label>
@@ -251,8 +269,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=84"></script>
-  <script src="cloud.js?v=84"></script>
-  <script src="app.js?v=84"></script>
+  <script src="data.js?v=85"></script>
+  <script src="cloud.js?v=85"></script>
+  <script src="app.js?v=85"></script>
 </body>
 </html>

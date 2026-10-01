@@ -121,7 +121,11 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .w-proj-ti { flex: 0 0 auto; cursor: pointer; color: var(--copper); font-size: 15px; padding: 0 3px; opacity: .75; }
 .w-proj-ti:hover { opacity: 1; }
 #woverlay .dialog-actions { flex-wrap: wrap; }
-.w-proj-label { margin: -2px 0 4px; }
+.w-proj-label { margin: -2px 0 0; }
+.w-proj-addr { display: flex; gap: 6px; margin-bottom: 4px; }
+.w-proj-addr input { min-width: 0; flex: 2 1 0; }
+.w-proj-addr input.w-addr-plz { flex: 1 1 0; }
+#f-addr-wrap { display: flex; flex-direction: column; gap: 8px; }
 .wk-cell.wk-split { background: repeating-linear-gradient(135deg, #e6f0fb, #e6f0fb 8px, #dbe9f8 8px, #dbe9f8 16px); font-size: 10.5px; font-weight: 600; color: #274069; }
 .btn.primary { background: var(--copper); border-color: var(--copper-dark); color: #fff; }
 .btn.primary:hover { background: var(--copper-dark); }

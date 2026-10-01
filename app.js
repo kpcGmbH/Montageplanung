@@ -43,7 +43,7 @@
 
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
-    const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, capRole: r.capRole, bars: r.bars })) }));
+    const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
     return { groups, team: PLAN.team, assignments, changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
@@ -1005,6 +1005,13 @@
   // ---- Editor ----
   const overlay = document.getElementById('overlay');
   const fLabel = document.getElementById('f-label');
+  // Bekanntes Kleinprojekt gewählt → Adresse übernehmen (nur wenn noch keine eingetragen ist)
+  fLabel.addEventListener('input', () => {
+    if (!current || !isKleinRow(current.row)) return;
+    const k = kleinKnown().get(fLabel.value.trim().toLowerCase()); if (!k) return;
+    const els = ADDR_KEYS.map(key => document.getElementById('f-' + key));
+    if (els.every(e => !e.value.trim())) ADDR_KEYS.forEach((key, i) => { els[i].value = k[key] || ''; });
+  });
   const fCat = document.getElementById('f-cat');
   const fStart = document.getElementById('f-start');
   const fEnd = document.getElementById('f-end');
@@ -1115,6 +1122,11 @@
     fLabel.value = bar.label || '';
     fCat.value = bar.cat;
     fStart.value = bar.start; fEnd.value = bar.end;
+    // Kleinprojekte: Adresse je Montage + Vorschläge aus früheren Kleinprojekten
+    const klein = isKleinRow(row);
+    document.getElementById('f-addr-wrap').style.display = klein ? '' : 'none';
+    for (const k of ADDR_KEYS) document.getElementById('f-' + k).value = klein ? (bar[k] || '') : '';
+    if (klein) { fillKleinList(); fLabel.setAttribute('list', 'kleinList'); } else fLabel.removeAttribute('list');
     // Kontextabhängige Felder
     document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Montage-Phasen nur bei Projekten
     document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
@@ -1147,6 +1159,7 @@
     const { row, bar } = current;
     delete bar.weekgen;   // manuell bearbeitet → als echtes Fenster behandeln (nicht mehr als Woche-Fragment auto-aufräumen)
     bar.label = fLabel.value.trim();
+    if (isKleinRow(row)) setAddr(bar, { strasse: document.getElementById('f-strasse').value, plz: document.getElementById('f-plz').value, ort: document.getElementById('f-ort').value });
     let s = fStart.value || bar.start, e = fEnd.value || bar.end;
     if (parse(e) < parse(s)) e = s;
     bar.start = s; bar.end = e;
@@ -1478,6 +1491,8 @@
       else { const p = parseLabel(row.label); nr = p.nr; ort = p.ort; name = p.name; }
     }
     pSite.value = site; pNr.value = nr; pOrt.value = ort; pName.value = name;
+    const pa = row ? rowAddr(row) : { strasse: '', plz: '' };
+    document.getElementById('p-strasse').value = pa.strasse; document.getElementById('p-plz').value = pa.plz;
     applyAreaMode();
     poverlay.hidden = false;
     (site ? pName : pNr).focus();
@@ -1493,6 +1508,12 @@
     const fields = site
       ? { site, label: name, nummer: undefined, ort: undefined, name }
       : { site: undefined, nummer: nr, ort, name, label: composeLabel(nr, ort, name) };
+    fields.strasse = document.getElementById('p-strasse').value.trim() || undefined;
+    fields.plz = document.getElementById('p-plz').value.trim() || undefined;
+    if (site) {   // Adresse gilt für die ganze Baustelle → auf alle Bereiche übertragen
+      const pg = PLAN.groups.find(x => x.name === 'Projekte');
+      for (const r of (pg ? pg.rows : [])) if (r.site === site) { r.strasse = fields.strasse; r.plz = fields.plz; }
+    }
     if (curProject) {
       Object.assign(curProject, fields);
       save(); render(); closeProjectDialog();
@@ -1606,13 +1627,47 @@
   // „Kleinprojekte" ist eine Sammelzeile: in der Woche zählt die Bezeichnung der einzelnen Montage,
   // nicht der Zeilentitel. `projects` bleibt der Zeilenname (Schlüssel für Verschieben/Bearbeiten).
   const isKleinRow = (row) => !!row && !row.site && /kleinprojekt/i.test(row.label || '');
+  // ---- Baustellenadresse: am Projekt (Straße/PLZ + Ort), bei Kleinprojekten an der einzelnen Montage ----
+  const ADDR_KEYS = ['strasse', 'plz', 'ort'];
+  function setAddr(obj, src) { for (const k of ADDR_KEYS) { const v = String((src && src[k]) || '').trim(); if (v) obj[k] = v; else delete obj[k]; } }
+  const addrText = (o) => o ? [o.strasse, [o.plz, o.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
+  // Bereiche einer Baustelle teilen sich die Adresse → notfalls beim Geschwister-Bereich nachsehen
+  function rowAddr(row) {
+    const g = PLAN.groups.find(x => x.name === 'Projekte');
+    const src = (row.strasse || row.plz || !row.site || !g) ? row : (g.rows.find(r => r.site === row.site && (r.strasse || r.plz)) || row);
+    return { strasse: src.strasse || '', plz: src.plz || '', ort: row.ort || '' };
+  }
+  function addrOf(row, bar) {
+    if (isKleinRow(row)) return bar ? addrText(bar) : '';
+    const a = rowAddr(row);
+    return (a.strasse || a.plz) ? addrText(a) : '';   // Ort allein steht schon im Projektnamen
+  }
+  // Bereits verwendete Kleinprojekte (Bezeichnung → Adresse) als Vorschläge
+  function kleinKnown() {
+    const map = new Map(), g = PLAN.groups.find(x => x.name === 'Projekte');
+    for (const row of (g ? g.rows : [])) {
+      if (!isKleinRow(row)) continue;
+      for (const b of row.bars) {
+        const label = (b.label || '').trim(); if (!label) continue;
+        const key = label.toLowerCase(), had = map.get(key);
+        if (!had || (!addrText(had) && addrText(b))) map.set(key, { label, strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' });
+      }
+    }
+    return map;
+  }
+  function fillKleinList() {
+    const dl = document.getElementById('kleinList'); if (!dl) return new Map();
+    const known = kleinKnown(); dl.innerHTML = '';
+    for (const k of known.values()) { const o = document.createElement('option'); o.value = k.label; const a = addrText(k); if (a) o.label = a; dl.appendChild(o); }
+    return known;
+  }
   const weekName = (row, bar) => (isKleinRow(row) && bar && bar.label) ? bar.label : (row.site || row.label);
 
   // Leitet den Wocheninhalt LIVE aus dem Zeitplan ab: je (Person, Tag) die Projekte (aus Phasen),
   // Urlaub (interne Vacation-Balken) und Buchung (externe). Basis für Doppelbuchungs-Anzeige.
   function weekDerived() {
     const map = {};
-    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], labels: [], urlaub: false, booking: false, unconfirmed: false }); };
+    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], labels: [], addrs: [], urlaub: false, booking: false, unconfirmed: false }); };
     const eachWorkday = (s, e, cb) => {
       for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
     };
@@ -1625,15 +1680,16 @@
       const name = row.site || row.label;
       for (const bar of row.bars) {
         const shown = weekName(row, bar);
+        const at = addrOf(row, bar), addrLine = at ? '📍 ' + shown + ': ' + at : '';
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
         const unconf = effCat(row, bar) === 'preplanning';   // „Vorplanung / nicht bestätigt"
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
       }
     }
@@ -1772,7 +1828,7 @@
         const e = dp.bl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(p) };
         // Kleinprojekt: Bezeichnung der Montage mitnehmen, damit die Zielperson im selben Fenster landet
         const krow = projRows().find(r => r.id === dp.rowId), kb = (krow && isKleinRow(krow)) ? barOfPersonDay(krow, p.id, ms) : null;
-        if (kb) e.label = kb.label || '';
+        if (kb) { e.label = kb.label || ''; for (const k of ADDR_KEYS) e[k] = kb[k] || ''; }
         projects.push(e);
       }
       const a = assignments[key];
@@ -1838,7 +1894,7 @@
         const ti = el('span', 'wk-ti', '✉'); ti.title = 'Termineinladung erstellen';
         ti.addEventListener('click', (e) => { e.stopPropagation(); openTermineinladung(s.row, isKleinRow(s.row) ? s.bar : null); });
         nameCell.appendChild(ti);
-        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist kein Monteur eingeplant.' : '') + '\nKlick: Einsatz bearbeiten';
+        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (addrOf(s.row, s.bar) ? '\n📍 ' + addrOf(s.row, s.bar) : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist kein Monteur eingeplant.' : '') + '\nKlick: Einsatz bearbeiten';
         nameCell.addEventListener('click', () => openEditor(s.row, s.bar, false));
         grid.appendChild(nameCell);
         dates.forEach((ms, i) => {
@@ -1933,6 +1989,7 @@
           const chip = el('span', 'wk-extra' + (extraType ? ' t-' + extraType : ''), extra);
           cell.appendChild(chip);
         }
+        if (proj.length && der.addrs && der.addrs.length) title += (title ? '\n' : '') + der.addrs.join('\n');
         if (title) cell.title = title;
         // Baustellen-Einsatz (aus dem Zeitplan) lässt sich taggenau auf eine andere Person/einen anderen Tag ziehen
         // (nur Monteure – Bauleitung wird nicht per Gewerk-Phase verschoben)
@@ -2070,7 +2127,7 @@
       const rowEl = el('div', 'w-proj-row');
       const psel = document.createElement('select');
       for (const r of projRows()) { const o = el('option', null, r.site ? (r.site + ' · ' + r.label) : r.label); o.value = r.id; psel.appendChild(o); }
-      psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; delete entry.bar; entry.label = ''; renderProjRows(); };
+      psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; delete entry.bar; entry.label = ''; setAddr(entry, null); renderProjRows(); };
       rowEl.appendChild(psel);
       if (!curCellIsBl) {   // Gewerk-Auswahl nur bei Monteuren
         const gsel = document.createElement('select'); gsel.className = 'w-proj-gewerk';
@@ -2096,8 +2153,24 @@
         const lab = document.createElement('input'); lab.type = 'text'; lab.className = 'w-proj-label';
         lab.placeholder = 'Bezeichnung des Kleinprojekts (z. B. Kunde / Ort)';
         lab.title = 'Bezeichnung dieser Montage – gilt für das ganze Montagefenster im Zeitplan';
-        lab.value = entry.label || ''; lab.oninput = () => { entry.label = lab.value; };
+        lab.setAttribute('list', 'kleinList');
+        const known = fillKleinList();
+        const addr = el('div', 'w-proj-addr'), ains = {};
+        for (const [k, ph] of [['strasse', 'Straße + Nr.'], ['plz', 'PLZ'], ['ort', 'Ort']]) {
+          const a = document.createElement('input'); a.type = 'text'; a.placeholder = ph; a.className = 'w-addr-' + k; a.value = entry[k] || '';
+          a.oninput = () => { entry[k] = a.value; }; ains[k] = a; addr.appendChild(a);
+        }
+        lab.value = entry.label || '';
+        lab.oninput = () => {
+          entry.label = lab.value;
+          // Bekanntes Kleinprojekt → Adresse übernehmen (nur wenn noch keine eingetragen ist)
+          const k = known.get(lab.value.trim().toLowerCase());
+          if (k && ADDR_KEYS.every(key => !String(entry[key] || '').trim())) for (const key of ADDR_KEYS) { entry[key] = k[key] || ''; ains[key].value = entry[key]; }
+        };
+        // Schreibweise eines bekannten Kleinprojekts übernehmen (kein zweiter Eintrag nur wegen Groß-/Kleinschreibung)
+        lab.onchange = () => { const k = known.get(lab.value.trim().toLowerCase()); if (k) { lab.value = k.label; entry.label = k.label; } };
         wProjects.appendChild(lab);
+        wProjects.appendChild(addr);
       }
     });
     document.querySelector('#w-proj-section label').firstChild.textContent = curCellIsBl ? 'Baustelle(n) an diesem Tag (Bauleitung) ' : 'Baustellen an diesem Tag ';
@@ -2126,6 +2199,11 @@
   // Kleinprojekte: je Bezeichnung ein eigenes Fenster. Erst das Fenster des Eintrags (falls es den Tag
   // abdeckt), sonst ein gleichnamiges am Tag, sonst ein angrenzendes gleichnamiges Woche-Fenster erweitern, sonst neu.
   function kleinBarFor(row, ms, entry) {
+    const bar = kleinBarFind(row, ms, entry);
+    if (ADDR_KEYS.some(k => k in entry)) setAddr(bar, entry);   // Adresse aus der Maske auf die Montage schreiben
+    return bar;
+  }
+  function kleinBarFind(row, ms, entry) {
     const label = (entry.label || '').trim();
     const origin = (entry.bar && row.bars.indexOf(entry.bar) >= 0) ? entry.bar : null;
     if (!label && !origin) return weekBarFor(row, ms);
@@ -2209,9 +2287,9 @@
         // Sammelzeile: je Montage (Fenster), in der die Person an dem Tag steht, ein eigener Eintrag mit Bezeichnung
         const on = (r) => r.id === person.id && parse(r.start) <= ms && parse(r.end) >= ms;
         for (const b of krow.bars) {
-          if (curCellIsBl) { if (blRanges(b).some(on)) wProjectDraft.push({ rowId: krow.id, bl: true, bar: b, label: b.label || '' }); continue; }
+          if (curCellIsBl) { if (blRanges(b).some(on)) wProjectDraft.push({ rowId: krow.id, bl: true, bar: b, label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' }); continue; }
           for (const ph of (b.phases || [])) if (assignedRanges(ph).some(on))
-            wProjectDraft.push({ rowId: krow.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b, label: b.label || '' });
+            wProjectDraft.push({ rowId: krow.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b, label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' });
         }
         if (wProjectDraft.some(e => e.rowId === krow.id)) continue;
       }
@@ -2292,7 +2370,7 @@
     const text = wText.value.trim();
     clip = {
       kind: 'cell',
-      projects: wProjectDraft.map(e => ({ rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' })),
+      projects: wProjectDraft.map(e => { const c = { rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }; for (const k of ADDR_KEYS) if (k in e) c[k] = e[k]; return c; }),
       note: text ? { text, type: wType.value } : null,
     };
     toast('Eintrag kopiert – Zielzelle öffnen und „Einfügen"');
@@ -2301,7 +2379,7 @@
   // Kopierten Eintrag in die aktuell geöffnete Zelle einfügen (Felder füllen + speichern)
   document.getElementById('w-paste').onclick = () => {
     if (!curCellCtx || !clip || clip.kind !== 'cell') return;
-    wProjectDraft = clip.projects.map(e => ({ rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }));
+    wProjectDraft = clip.projects.map(e => Object.assign({}, e));
     renderProjRows();
     if (clip.note) { wText.value = clip.note.text; wType.value = clip.note.type; }
     else { wText.value = ''; }
@@ -2421,7 +2499,8 @@
       const bars = (row.bars || []).slice().sort((a, b) => parse(a.start) - parse(b.start));
       if (bars.length) { const b = bars[0]; if (b.start === b.end) datum = b.start; else zeitraum = fmt(parse(b.start)) + '–' + fmt(parse(b.end)); }
     }
-    return { objektname, projektnummer: row.nummer || '', ort: row.ort || '', datum, zeitraum };
+    const a = (bar && isKleinRow(row)) ? { strasse: bar.strasse || '', plz: bar.plz || '', ort: bar.ort || '' } : rowAddr(row);
+    return { objektname, projektnummer: row.nummer || '', ort: a.ort || row.ort || '', strasse: a.strasse, plz: a.plz, datum, zeitraum };
   }
   async function tiSendInit() {
     if (!tiProject || !tiReady || !tiFrame.contentWindow) return;
