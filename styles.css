@@ -465,6 +465,9 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
   border: 1.5px dashed #d0402e; outline-offset: -1.5px;
 }
 .wk-cell.wk-site-idle { background: #f3f4f6; cursor: pointer; }
+.wk-cell.wk-site-ok.wk-site-unconf { background: color-mix(in srgb, #ec8a2b 18%, #fff); color: #8a4a08; border: 1px dashed #c46a14; }
+.wk-cell.wk-site-ok.wk-site-unconf::after { content: ' ?'; }
+.wk-name.wk-site-name.wk-site-unconf-name { color: #8a4a08; }
 .wk-name.wk-site-name.wk-site-idle-name { color: #7b8188; }
 .wk-cell.wk-site-nostaff:hover, .wk-cell.wk-site-ok:hover, .wk-cell.wk-site-idle:hover { filter: brightness(0.97); }
 /* Sektion „Offener Bedarf" */

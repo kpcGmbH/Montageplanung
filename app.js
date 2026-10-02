@@ -1769,11 +1769,13 @@
     const w0 = selMonday, w1 = addDays(selMonday, 6);
     for (const row of projRows()) {
       for (const bar of row.bars) {
-        if (effCat(row, bar) !== 'confirmed') continue;
+        // Bestätigte Fenster immer; andere Projekt-Fenster (z. B. Vorplanung) nur, wenn in der Woche Monteure eingeplant sind
+        const ec = effCat(row, bar), confirmed = ec === 'confirmed';
+        if (ec === 'vacation' || ec === 'booking' || ec === 'bauleitung') continue;
         if (parse(bar.start) > w1 || parse(bar.end) < w0) continue;
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned, weekend: false }] : []);
-        const perDay = []; let anyGap = false, anyActive = false, anyPlanned = false;
+        const perDay = []; let anyGap = false, anyActive = false, anyPlanned = false, anyStaffed = false;
         for (let i = 0; i < 7; i++) {
           const ms = wdays[i], dow = new Date(ms).getUTCDay(), weekendDay = (dow === 0 || dow === 6);
           const inWindow = parse(bar.start) <= ms && parse(bar.end) >= ms;
@@ -1792,10 +1794,13 @@
           if (!phaseActive) { perDay.push('idle'); continue; }
           anyPlanned = true;
           const n = sumPersons(ids);   // Personen (inkl. Truppstärke), nicht nur Köpfe
+          if (n > 0) anyStaffed = true;
+          if (n === 0 && !confirmed) { perDay.push('idle'); continue; }   // unbestätigt: fehlende Besetzung ist noch keine Lücke
           if (n === 0) anyGap = true;
           perDay.push(n);
         }
-        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, anyGap, anyPlanned, row, bar });
+        if (!confirmed && !anyStaffed) continue;
+        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, anyGap, anyPlanned, unconfirmed: !confirmed, row, bar });
       }
     }
     // Reine Fenster (in dieser Woche kein Einsatz geplant) ans Ende – oben stehen die laufenden Montagen
@@ -1925,17 +1930,17 @@
     const sites = weekConfirmedSites();
     if (sites.length) {
       const gaps = sites.filter(s => s.anyGap).length;
-      grid.appendChild(el('div', 'wk-sep wk-sep-sites', 'Bestätigte Montagen diese Woche' + (gaps ? ' · ' + gaps + '× ohne Monteur' : '')));
+      grid.appendChild(el('div', 'wk-sep wk-sep-sites', 'Montagen diese Woche' + (gaps ? ' · ' + gaps + '× ohne Monteur' : '')));
       for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill wk-sep-sites'));
       for (const s of sites) {
-        const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : '') + (s.anyPlanned ? '' : ' wk-site-idle-name'));
+        const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : '') + (s.anyPlanned ? '' : ' wk-site-idle-name') + (s.unconfirmed ? ' wk-site-unconf-name' : ''));
         if (s.anyGap) { const w = el('span', 'wk-warn', '⚠'); nameCell.appendChild(w); }
         nameCell.appendChild(el('span', 'wk-site-text', s.name + (s.sub ? ' · ' + s.sub : '')));
         // Termineinladung: Kleinprojekt → je Montage (eigener Entwurf), sonst der Projekt-Entwurf wie im Zeitplan
         const ti = el('span', 'wk-ti', '✉'); ti.title = 'Termineinladung erstellen';
         ti.addEventListener('click', (e) => { e.stopPropagation(); openTermineinladung(s.row, isKleinRow(s.row) ? s.bar : null); });
         nameCell.appendChild(ti);
-        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (addrOf(s.row, s.bar) ? '\n📍 ' + addrOf(s.row, s.bar) : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist ein Einsatz geplant, aber kein Monteur zugeordnet.' : '') + (s.anyPlanned ? '' : '\nMontagefenster – in dieser Woche noch kein Einsatz geplant.') + '\nKlick: Einsatz bearbeiten';
+        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (s.unconfirmed ? '\nNoch nicht bestätigt (' + ((PLAN.categories[s.bar.cat] || {}).label || 'Vorplanung') + ') – Monteure sind aber schon eingeplant.' : '') + (addrOf(s.row, s.bar) ? '\n📍 ' + addrOf(s.row, s.bar) : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist ein Einsatz geplant, aber kein Monteur zugeordnet.' : '') + (s.anyPlanned ? '' : '\nMontagefenster – in dieser Woche noch kein Einsatz geplant.') + '\nKlick: Einsatz bearbeiten';
         nameCell.addEventListener('click', () => openEditor(s.row, s.bar, false));
         grid.appendChild(nameCell);
         dates.forEach((ms, i) => {
@@ -1953,7 +1958,8 @@
             cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
           } else {
             cell.classList.add('wk-site-ok'); cell.textContent = n + '×';
-            cell.title = n + ' Monteur' + (n > 1 ? 'e' : '') + ' eingeplant · klicken zum Bearbeiten';
+            if (s.unconfirmed) cell.classList.add('wk-site-unconf');
+            cell.title = n + ' Monteur' + (n > 1 ? 'e' : '') + ' eingeplant' + (s.unconfirmed ? ' – Termin noch nicht bestätigt' : '') + ' · klicken zum Bearbeiten';
             cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
           }
           grid.appendChild(cell);
