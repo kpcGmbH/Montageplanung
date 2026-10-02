@@ -1773,7 +1773,7 @@
         if (parse(bar.start) > w1 || parse(bar.end) < w0) continue;
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned, weekend: false }] : []);
-        const perDay = []; let anyGap = false, anyActive = false;
+        const perDay = []; let anyGap = false, anyActive = false, anyPlanned = false;
         for (let i = 0; i < 7; i++) {
           const ms = wdays[i], dow = new Date(ms).getUTCDay(), weekendDay = (dow === 0 || dow === 6);
           const inWindow = parse(bar.start) <= ms && parse(bar.end) >= ms;
@@ -1788,14 +1788,18 @@
           // Wochenende nur zeigen, wenn dort tatsächlich ein (Wochenend-)Einsatz liegt – sonst keine Lücke melden.
           if (weekendDay && !phaseActive) { perDay.push(null); continue; }
           anyActive = true;
+          // Fenster ohne Phase an dem Tag: kein Bedarf geplant → neutral, keine Warnung
+          if (!phaseActive) { perDay.push('idle'); continue; }
+          anyPlanned = true;
           const n = sumPersons(ids);   // Personen (inkl. Truppstärke), nicht nur Köpfe
           if (n === 0) anyGap = true;
           perDay.push(n);
         }
-        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, anyGap, row, bar });
+        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, anyGap, anyPlanned, row, bar });
       }
     }
-    return out;
+    // Reine Fenster (in dieser Woche kein Einsatz geplant) ans Ende – oben stehen die laufenden Montagen
+    return out.filter(o => o.anyPlanned).concat(out.filter(o => !o.anyPlanned));
   }
 
   // Kleines Auswahlmenü, um einen offenen Bedarf direkt in der Woche taggenau zu besetzen.
@@ -1924,23 +1928,28 @@
       grid.appendChild(el('div', 'wk-sep wk-sep-sites', 'Bestätigte Montagen diese Woche' + (gaps ? ' · ' + gaps + '× ohne Monteur' : '')));
       for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill wk-sep-sites'));
       for (const s of sites) {
-        const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : ''));
+        const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : '') + (s.anyPlanned ? '' : ' wk-site-idle-name'));
         if (s.anyGap) { const w = el('span', 'wk-warn', '⚠'); nameCell.appendChild(w); }
         nameCell.appendChild(el('span', 'wk-site-text', s.name + (s.sub ? ' · ' + s.sub : '')));
         // Termineinladung: Kleinprojekt → je Montage (eigener Entwurf), sonst der Projekt-Entwurf wie im Zeitplan
         const ti = el('span', 'wk-ti', '✉'); ti.title = 'Termineinladung erstellen';
         ti.addEventListener('click', (e) => { e.stopPropagation(); openTermineinladung(s.row, isKleinRow(s.row) ? s.bar : null); });
         nameCell.appendChild(ti);
-        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (addrOf(s.row, s.bar) ? '\n📍 ' + addrOf(s.row, s.bar) : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist kein Monteur eingeplant.' : '') + '\nKlick: Einsatz bearbeiten';
+        nameCell.title = s.name + (s.sub ? ' · ' + s.sub : '') + (addrOf(s.row, s.bar) ? '\n📍 ' + addrOf(s.row, s.bar) : '') + (s.anyGap ? '\n⚠ An mindestens einem Tag ist ein Einsatz geplant, aber kein Monteur zugeordnet.' : '') + (s.anyPlanned ? '' : '\nMontagefenster – in dieser Woche noch kein Einsatz geplant.') + '\nKlick: Einsatz bearbeiten';
         nameCell.addEventListener('click', () => openEditor(s.row, s.bar, false));
         grid.appendChild(nameCell);
         dates.forEach((ms, i) => {
           const n = s.perDay[i];
           const cell = el('div', 'wk-cell wk-site-cell' + (i >= 5 ? ' weekend' : ''));
           if (n === null) { /* außerhalb des Fensters – leer */ }
+          else if (n === 'idle') {
+            cell.classList.add('wk-site-idle');
+            cell.title = 'Montagefenster – noch kein Einsatz geplant · klicken zum Bearbeiten';
+            cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
+          }
           else if (n === 0) {
             cell.classList.add('wk-site-nostaff'); cell.textContent = '—';
-            cell.title = 'Bestätigte Montage – kein Monteur eingeplant · klicken zum Bearbeiten';
+            cell.title = 'Einsatz geplant, aber kein Monteur zugeordnet · klicken zum Bearbeiten';
             cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
           } else {
             cell.classList.add('wk-site-ok'); cell.textContent = n + '×';
