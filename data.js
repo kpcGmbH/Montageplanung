@@ -28,7 +28,7 @@ const PLAN = {
 
   // Fuhrpark. driver = Stammfahrer (Name wie im Monteure-Team); leer = frei verfügbar.
   vehicles: [
-    { id: 'kp190', name: 'KP-190', seats: 2, driver: 'Kurt Herrmann' },
+    { id: 'kp190', name: 'KP-170', seats: 2, driver: 'Kurt Herrmann' },   // ID historisch, Kennzeichen ist KP-170
     { id: 'kp150', name: 'KP-150', seats: 4, driver: 'Boban Petrovic' },
     { id: 'kp155', name: 'KP-155', seats: 2, driver: 'Milenko Stanic' },
     { id: 'kp160', name: 'KP-160', seats: 2, driver: 'Luis Pinheiro' },

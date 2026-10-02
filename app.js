@@ -52,6 +52,7 @@
     if (data && data.assignments) assignments = data.assignments;
     // Fuhrpark (Katalog) + Fahrzeug je Person/Tag; fehlt der Katalog im Stand, bleibt der aus data.js
     if (data && Array.isArray(data.vehicles) && data.vehicles.length) PLAN.vehicles = data.vehicles;
+    for (const v of (PLAN.vehicles || [])) if (v.name === 'KP-190') v.name = 'KP-170';   // Korrektur: das Fahrzeug heißt KP-170 (ID bleibt, damit Zuordnungen gelten)
     if (data && data.cars && typeof data.cars === 'object') PLAN.cars = data.cars; else PLAN.cars = PLAN.cars || {};
     if (data && data.nights && typeof data.nights === 'object') PLAN.nights = data.nights; else PLAN.nights = PLAN.nights || {};
     // Changelog (Änderungsverlauf) – geteilt über den 3-Wege-Merge (Array-Vereinigung über id)
