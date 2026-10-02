@@ -107,15 +107,50 @@ window.Cloud = (function () {
     return msalAccount;
   }
 
+  // Sitzung abgelaufen (stille Token-Erneuerung schlägt fehl): KEIN Popup aus dem Hintergrund – Browser blockieren
+  // das („popup_window_error"). Beim Laden der Seite direkt per Weiterleitung neu anmelden (nichts geht verloren),
+  // mitten in der Arbeit nur einen Hinweis zeigen und die ungespeicherten Änderungen für danach sichern.
+  let needRelogin = false, initPhase = false;
+  const UNSAVED_KEY = 'montageplanung_unsaved', RELOGIN_TS_KEY = 'montageplanung_relogin_ts';
+  function stashUnsaved() {
+    try {
+      const local = snapFn ? snapFn() : null;
+      if (local && baseSnap && !eq(local, baseSnap)) sessionStorage.setItem(UNSAVED_KEY, JSON.stringify({ base: baseSnap, local, ts: Date.now() }));
+    } catch (e) { /* Speicher voll / gesperrt → ohne Sicherung weiter */ }
+  }
+  async function restoreUnsaved() {
+    let st = null;
+    try { st = JSON.parse(sessionStorage.getItem(UNSAVED_KEY) || 'null'); sessionStorage.removeItem(UNSAVED_KEY); } catch (e) { return; }
+    if (!st || !st.local || !baseSnap || Date.now() - (st.ts || 0) > 12 * 3600 * 1000) return;
+    const merged = merge3(st.base || baseSnap, st.local, baseSnap);
+    if (eq(merged, baseSnap)) return;
+    if (applyFn) applyFn(clone(merged), 'merge');
+    await push(merged);
+    setStatus('Änderungen von vor der Anmeldung übernommen ' + hhmm(), 'ok');
+  }
+  function reloginError() {
+    needRelogin = true;
+    setStatus('Sitzung abgelaufen – bitte „Neu anmelden" klicken', 'warn');
+    const err = new Error('Sitzung abgelaufen – bitte neu anmelden'); err.relogin = true; return err;
+  }
   async function getToken() {
     try {
       const res = await msalApp.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: msalAccount });
+      needRelogin = false;
       return res.accessToken;
     } catch (e) {
-      if (USE_REDIRECT) { await msalApp.acquireTokenRedirect({ scopes: GRAPH_SCOPES }); throw e; }
-      const res = await msalApp.acquireTokenPopup({ scopes: GRAPH_SCOPES });
-      msalAccount = res.account;
-      return res.accessToken;
+      if (IN_POPUP) throw reloginError();
+      // Automatisch weiterleiten nur beim Seitenstart oder auf Mobilgeräten – und höchstens einmal pro Minute (keine Schleife)
+      let last = 0; try { last = +sessionStorage.getItem(RELOGIN_TS_KEY) || 0; } catch (x) {}
+      if ((USE_REDIRECT || initPhase) && Date.now() - last > 60000) {
+        try { sessionStorage.setItem(RELOGIN_TS_KEY, String(Date.now())); } catch (x) {}
+        stashUnsaved();
+        setStatus('Sitzung abgelaufen – Anmeldung wird erneuert…', 'sync');
+        await msalApp.acquireTokenRedirect({ scopes: GRAPH_SCOPES, account: msalAccount, loginHint: msalAccount && msalAccount.username });
+        const err = new Error('Anmeldung wird erneuert'); err.relogin = true; throw err;
+      }
+      stashUnsaved();
+      throw reloginError();
     }
   }
 
@@ -225,6 +260,7 @@ window.Cloud = (function () {
 
   return {
     isReady() { return !!msalAccount; },
+    needsLogin() { return needRelogin; },   // Sitzung abgelaufen → Nutzer muss „Neu anmelden" klicken
     inPopup() { return IN_POPUP; },
     saveDraft(name, obj) { return saveDraftFile(name, obj); },
     loadDraft(name) { return loadDraftFile(name); },
@@ -239,7 +275,10 @@ window.Cloud = (function () {
       catch (e) { console.warn('Cloud/MSAL init:', e); setStatus('offline (lokal)', 'off'); return false; }
       if (msalAccount) {
         setStatus('angemeldet: ' + (msalAccount.username || ''), 'ok');
-        try { await pull(true); startSync(); } catch (e) { setStatus('Fehler: ' + e.message, 'warn'); }
+        initPhase = true;
+        try { await pull(true); await restoreUnsaved(); } catch (e) { if (!e.relogin) setStatus('Fehler: ' + e.message, 'warn'); }
+        finally { initPhase = false; }
+        startSync();
         return true;
       }
       if (IN_POPUP) { showOpenInMainWindow(); return false; }  // im Popup-Fenster gleich den Hinweis zeigen
@@ -253,7 +292,8 @@ window.Cloud = (function () {
       try {
         if (!msalApp) await msalInit();
         setStatus('Anmeldung wird geöffnet…', 'sync');
-        await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
+        if (msalAccount) stashUnsaved();   // erneute Anmeldung mitten in der Arbeit: Ungespeichertes sichern
+        await msalApp.loginRedirect(Object.assign({ scopes: GRAPH_SCOPES }, msalAccount && msalAccount.username ? { loginHint: msalAccount.username } : {}));
       } catch (e) {
         console.error('Login-Fehler:', e);
         const code = e && (e.errorCode || e.errorNo);
@@ -271,7 +311,7 @@ window.Cloud = (function () {
     async reload() {
       if (!msalAccount || syncing) return;
       syncing = true;
-      try { await pull(true); } catch (e) { setStatus('Fehler: ' + e.message, 'warn'); } finally { syncing = false; }
+      try { await pull(true); } catch (e) { if (!e.relogin) setStatus('Fehler: ' + e.message, 'warn'); } finally { syncing = false; }
     },
     scheduleSave(snap) {
       if (!msalAccount) return;               // ohne Login nur lokal speichern
@@ -281,7 +321,7 @@ window.Cloud = (function () {
         if (syncing) { saveTimer = setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(pendingSnap); }, 400); return; }
         syncing = true;
         try { setStatus('speichere…', 'sync'); await push(pendingSnap); }
-        catch (e) { setStatus('Speicher-Fehler: ' + e.message, 'warn'); }
+        catch (e) { if (!e.relogin) setStatus('Speicher-Fehler: ' + e.message, 'warn'); }
         finally { syncing = false; }
       }, 1500);
     },

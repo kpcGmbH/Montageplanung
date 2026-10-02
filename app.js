@@ -3094,7 +3094,8 @@
   function updateCloudUI(text, cls) {
     if (cloudStatusEl) { cloudStatusEl.textContent = text; cloudStatusEl.className = 'cloud-status ' + (cls || ''); }
     const ready = !!(window.Cloud && Cloud.isReady());
-    if (cloudLoginBtn) cloudLoginBtn.textContent = ready ? 'Abmelden' : 'Anmelden';
+    const relog = !!(window.Cloud && Cloud.needsLogin && Cloud.needsLogin());   // Sitzung abgelaufen
+    if (cloudLoginBtn) { cloudLoginBtn.textContent = relog ? 'Neu anmelden' : ready ? 'Abmelden' : 'Anmelden'; cloudLoginBtn.classList.toggle('primary', relog); }
     if (loginNotice) loginNotice.hidden = ready;   // nur zeigen, solange nicht angemeldet
     const isErr = cls === 'warn' && !ready;
     // Fehler direkt sichtbar machen – im In-App-Banner UND im Login-Gate (Link von showOpenInMainWindow nicht überschreiben)
@@ -3110,6 +3111,7 @@
   }
   if (cloudLoginBtn) cloudLoginBtn.onclick = () => {
     if (!window.Cloud) return;
+    if (Cloud.needsLogin && Cloud.needsLogin()) { Cloud.login(); return; }
     if (Cloud.isReady()) { Promise.resolve(Cloud.logout()).then(showGateLogin); } else Cloud.login();
   };
   const loginNoticeBtn = document.getElementById('loginNoticeBtn');
