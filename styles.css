@@ -656,3 +656,8 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 
 .f-bl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .f-bl-chips .trade-chip { cursor: pointer; }
+
+/* Woche: Gewerk-Kürzel neben dem Monteur */
+.wk-name.wk-person { gap: 6px; }
+.wk-person-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wk-name.wk-person .trade-tags { flex: 0 0 auto; display: inline-flex; gap: 3px; }

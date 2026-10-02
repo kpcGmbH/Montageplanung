@@ -2027,8 +2027,12 @@
           : addSection('mont', 'Monteure (' + (people.length - nBl) + ')', 'wk-sep-mont');
       }
       if (!secOpen) continue;
-      const nameCell = el('div', 'wk-name' + (p.kind === 'extern' ? ' extern' : ''), p.name);
-      nameCell.title = p.name + (p.kind === 'extern' ? ' (extern)' : '') + '\nRechtsklick: Woche kopieren / einfügen';
+      const nameCell = el('div', 'wk-name wk-person' + (p.kind === 'extern' ? ' extern' : ''));
+      nameCell.appendChild(el('span', 'wk-person-name', p.name));
+      // Gewerke des Monteurs als farbige Kürzel – hilft beim Besetzen von offenem Bedarf
+      const ptr = (p.trades || []).filter(k => TRADES()[k]);
+      if (ptr.length) nameCell.appendChild(tradeTags(ptr));
+      nameCell.title = p.name + (p.kind === 'extern' ? ' (extern)' : '') + (ptr.length ? '\nGewerke: ' + ptr.map(k => TRADES()[k].label).join(', ') : '') + '\nRechtsklick: Woche kopieren / einfügen';
       nameCell.addEventListener('contextmenu', (e) => { e.preventDefault(); openPersonMenu(e.clientX, e.clientY, p); });
       grid.appendChild(nameCell);
       dates.forEach((ms, i) => {
