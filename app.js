@@ -2800,7 +2800,7 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=54';
+  const TI_SRC = 'termineinladung.html?v=55';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
@@ -2876,13 +2876,32 @@
       pf.mitfahrer = uniq(phs.flatMap(p => (p.assigned || []).map(idOf))).map(monteurName).join(', ');
       const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
       if (bl.length) pf.bl_name = bl[0];
-      // Übernachtung geplant? (Vorgabe der Phase oder in der Woche gesetzte Nächte)
-      const pids = uniq(phs.flatMap(p => (p.assigned || []).map(idOf)));
-      const nightSet = Object.keys(PLAN.nights || {}).some(k => { const [id, d] = k.split('|'); return PLAN.nights[k] === 1 && pids.indexOf(id) >= 0 && phs.some(p => d >= p.start && d <= p.end); });
-      if (phs.some(p => p.overnight) || nightSet) pf.uebernachtung = 'Ja';
-      // Fahrzeuge der eingeplanten Monteure am ersten Tag des Einsatzes
-      const d0 = phs.map(p => p.start).sort()[0], der0 = {};
-      pf.fahrzeug = uniq(phs.flatMap(p => (p.assigned || []).map(idOf)).map(id => { der0[akey(id, d0)] = { projects: ['x'] }; const v = effVeh(id, d0, der0); return v ? v.name : null; }).filter(Boolean)).join(', ');
+    }
+    // Aus der Planung als Vorauswahl: Monteure, Fahrzeuge mit Insassen, Übernachtung. Gilt für Gewerk-Einladungen
+    // und für die Einladung einer einzelnen Montage (dann alle Phasen des Fensters).
+    const planPhs = phs.length ? phs : ((bar && bar.phases) || []);
+    if (bar && planPhs.length) {
+      const uniq = (arr) => [...new Set(arr)];
+      const pids = uniq(planPhs.flatMap(p => assignedRanges(p).map(r => r.id)));
+      if (pids.length) pf.mitfahrer = pids.map(monteurName).join(', ');
+      // Übernachtung: tatsächlich geplante Nächte (Vorgabe der Phase abzüglich abgewählter + einzeln gesetzte)
+      let nights = 0;
+      for (const ph of planPhs) for (const r of assignedRanges(ph)) for (let ms = parse(r.start); ms <= parse(r.end); ms = addDays(ms, 1)) {
+        const nx = addDays(ms, 1), x = (PLAN.nights || {})[akey(r.id, isoStr(ms))];
+        const def = !!ph.overnight && (ph.weekend || isWorkdayMs(nx)) && assignedRanges(ph).some(q => q.id === r.id && parse(q.start) <= nx && parse(q.end) >= nx);
+        if (x === 1 || (x !== 0 && def)) nights++;
+      }
+      pf.uebernachtung = nights ? 'Ja' : 'Nein';
+      // Fahrzeuge am ersten Einsatztag, je Fahrzeug mit allen Insassen (auch Mitfahrer anderer Gewerke / Bauleitung)
+      const first = planPhs.slice().sort((x, y) => parse(x.start) - parse(y.start))[0];
+      const d0 = first.weekend ? first.start : snapWorkday(first.start);
+      const keepMonday = selMonday;
+      try {
+        selMonday = mondayMs(parse(d0));
+        const der = weekDerived(), occ = carOcc(d0, der);
+        const used = uniq(pids.map(id => { const v = effVeh(id, d0, der); return v ? v.id : null; }).filter(Boolean));
+        pf.fahrzeug = used.map(id => vehLabel(vehById(id)) + ': ' + (occ[id] || []).join(', ')).join(' · ');
+      } finally { selMonday = keepMonday; }
     }
     pf.shared = tiSharedOf(row, bar);   // überschreibt auch einen geladenen Entwurf – diese Angaben sind projektweit gleich
     return pf;

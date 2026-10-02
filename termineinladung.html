@@ -717,6 +717,7 @@ function collectState(){
     const k = elKey(el); if(!k) return;
     st[k] = (el.type==="checkbox") ? !!el.checked : el.value;
   });
+  if (typeof manualFields === 'object') st.__manual = manualFields;
   return st;
 }
 function syncPanels(){
@@ -1045,6 +1046,19 @@ function applyShared(sh){
   [['pb_select','pb_name'],['bl_select','bl_name']].forEach(([s,n])=>{ const i = CONTACTS.findIndex(c=>c.name === $(n).value.trim()); $(s).value = i >= 0 ? String(i) : ''; });
   clearMissing(); render();
 }
+// Vorauswahl aus der Planung (Fahrzeug mit Insassen, Monteure, Übernachtung): wird bei jedem Öffnen neu
+// übernommen – außer das Feld wurde in dieser Einladung von Hand geändert.
+const AUTO_IDS = ['fahrzeug','mitfahrer','uebernachtung'];
+let manualFields = {};
+function applyAuto(pf, st){
+  if (!pf) return;
+  if (st) {
+    if (st.__manual) manualFields = Object.assign({}, st.__manual);
+    else AUTO_IDS.forEach(id=>{ const v = st['id:'+id]; if (v && v !== 'Nein') manualFields[id] = true; });   // Alt-Entwurf: Eingetragenes bleibt
+  }
+  AUTO_IDS.forEach(id=>{ const el=$(id); if (el && !manualFields[id] && pf[id]) el.value = pf[id]; });
+  render();
+}
 function postShared(){
   if (!EMBEDDED || !sharedLive) return;
   clearTimeout(sharedTimer);
@@ -1054,6 +1068,9 @@ function postShared(){
   }, 500);
 }
 if (EMBEDDED) {
+  const markManual = (e)=>{ const id = e.target && e.target.id; if (sharedLive && AUTO_IDS.indexOf(id) >= 0) manualFields[id] = true; };
+  document.addEventListener('input', markManual, true);
+  document.addEventListener('change', markManual, true);
   document.addEventListener('input', postShared, true);
   document.addEventListener('change', postShared, true);
   // Eingebettet in die Montageplanung-App: Speichern/Laden läuft über SharePoint (Elternfenster).
@@ -1063,6 +1080,7 @@ if (EMBEDDED) {
     if (m.type === 'ti-init') {
       if (m.state) applyState(m.state); else applyPrefill(m.prefill);
       applyShared(m.prefill && m.prefill.shared);
+      applyAuto(m.prefill, m.state);
       sharedLive = true;
     }
     else if (m.type === 'ti-saved') { toast('Zwischenstand in SharePoint gespeichert'); }
