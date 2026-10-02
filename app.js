@@ -43,7 +43,7 @@
 
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
-    const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
+    const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, ti: r.ti, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
     return { groups, team: PLAN.team, assignments, changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
@@ -2610,7 +2610,7 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=49';
+  const TI_SRC = 'termineinladung.html?v=50';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
@@ -2629,6 +2629,37 @@
     const barKey = bar ? '__' + String(bar.bid || bar.start || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
     const idxs = tiIdxs(bar, phIdx), phKey = idxs.length ? '__' + idxs.map(i => tiPhaseKey(bar, i)).join('-') : '';
     return (base || 'projekt') + '__' + row.id + barKey + phKey + '.json';
+  }
+  // ---- Gemeinsame Projektdaten für alle Einladungen eines Projekts (Adresse, Ansprechpartner, Zugang, OneDrive) ----
+  // Projekt: Straße/PLZ an der Zeile, der Rest in row.ti. Kleinprojekt: alles an der einzelnen Montage (bar / bar.ti).
+  const TI_SHARED_KEYS = ['pb_name', 'pb_tel', 'pb_mail', 'bl_name', 'bl_tel', 'bl_mail', 'vorort', 'anmeldung', 'zugang', 'parken', 'plan_onedrive'];
+  const tiSharedHost = (row, bar) => isKleinRow(row) ? (bar || null) : row;
+  function tiSharedOf(row, bar) {
+    const host = tiSharedHost(row, bar); if (!host) return {};
+    let blob = host.ti;
+    if (!blob && host === row && row.site) {   // Bereiche einer Baustelle teilen sich die Angaben
+      const g = PLAN.groups.find(x => x.name === 'Projekte'), sib = g && g.rows.find(r => r.site === row.site && r.ti);
+      if (sib) blob = sib.ti;
+    }
+    const a = host === row ? rowAddr(row) : { strasse: host.strasse || '', plz: host.plz || '', ort: host.ort || '' };
+    return Object.assign({}, blob || {}, { strasse: a.strasse, plz: a.plz, ort: (blob && blob.ort) || a.ort });
+  }
+  function tiStoreShared(fields) {
+    const row = tiProject, host = row && tiSharedHost(row, tiBar); if (!host || !fields) return;
+    const before = JSON.stringify([host.strasse, host.plz, host.ort, host.ti]);
+    const blob = {};
+    for (const k of TI_SHARED_KEYS) { const v = String(fields[k] || '').trim(); if (v) blob[k] = v; }
+    if (host === row) {
+      const str = String(fields.strasse || '').trim() || undefined, plz = String(fields.plz || '').trim() || undefined, ort = String(fields.ort || '').trim();
+      if (ort && ort !== (row.ort || '')) blob.ort = ort;   // Ort der Zeile steckt im Projektnamen → Abweichung nur für die Einladung merken
+      const g = PLAN.groups.find(x => x.name === 'Projekte');
+      const rows = row.site && g ? g.rows.filter(r => r.site === row.site) : [row];
+      for (const r of rows) { r.strasse = str; r.plz = plz; if (Object.keys(blob).length) r.ti = Object.assign({}, blob); else delete r.ti; }
+    } else {
+      setAddr(host, fields);
+      if (Object.keys(blob).length) host.ti = blob; else delete host.ti;
+    }
+    if (JSON.stringify([host.strasse, host.plz, host.ort, host.ti]) !== before) save();
   }
   function tiPrefill(row, bar, phIdx) {
     const phs = tiIdxs(bar, phIdx).map(i => bar.phases[i]);
@@ -2656,6 +2687,7 @@
       const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
       if (bl.length) pf.bl_name = bl[0];
     }
+    pf.shared = tiSharedOf(row, bar);   // überschreibt auch einen geladenen Entwurf – diese Angaben sind projektweit gleich
     return pf;
   }
   async function tiSendInit() {
@@ -2697,6 +2729,7 @@
       try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
       catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, '*'); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
     }
+    else if (m.type === 'ti-shared') { tiStoreShared(m.fields); }
     else if (m.type === 'ti-reset') { tiFresh = true; tiReload(); }
   });
 

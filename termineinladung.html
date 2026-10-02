@@ -1024,12 +1024,36 @@ $("rueckmeldung").value = RUECKMELDUNG.join("\n");
 document.querySelector('[data-art="inbetriebnahme"]').checked = true;
 applyArt(true);
 ready = true;
+// Gemeinsame Projektdaten (Adresse, Ansprechpartner, Zugang, OneDrive-Link): gelten für ALLE Einladungen
+// eines Projekts. Die App liefert sie beim Öffnen und bekommt jede Änderung zurück.
+const SHARED_IDS = ['strasse','plz','ort','pb_name','pb_tel','pb_mail','bl_name','bl_tel','bl_mail','vorort','anmeldung','zugang','parken','plan_onedrive'];
+let sharedLive = false, sharedTimer = null;
+function applyShared(sh){
+  if (!sh) return;
+  SHARED_IDS.forEach(id=>{ const el=$(id); if (el && sh[id]) el.value = sh[id]; });
+  [['pb_select','pb_name'],['bl_select','bl_name']].forEach(([s,n])=>{ const i = CONTACTS.findIndex(c=>c.name === $(n).value.trim()); $(s).value = i >= 0 ? String(i) : ''; });
+  clearMissing(); render();
+}
+function postShared(){
+  if (!EMBEDDED || !sharedLive) return;
+  clearTimeout(sharedTimer);
+  sharedTimer = setTimeout(()=>{
+    const fields = {}; SHARED_IDS.forEach(id=>{ const el=$(id); if (el) fields[id] = el.value.trim(); });
+    window.parent.postMessage({ type:'ti-shared', fields }, '*');
+  }, 500);
+}
 if (EMBEDDED) {
+  document.addEventListener('input', postShared, true);
+  document.addEventListener('change', postShared, true);
   // Eingebettet in die Montageplanung-App: Speichern/Laden läuft über SharePoint (Elternfenster).
   ['loadBtn','folderBtn'].forEach(id=>{ const b=$(id); if(b) b.style.display='none'; });
   window.addEventListener('message', (e)=>{
     const m = e.data || {};
-    if (m.type === 'ti-init') { if (m.state) applyState(m.state); else applyPrefill(m.prefill); }
+    if (m.type === 'ti-init') {
+      if (m.state) applyState(m.state); else applyPrefill(m.prefill);
+      applyShared(m.prefill && m.prefill.shared);
+      sharedLive = true;
+    }
     else if (m.type === 'ti-saved') { toast('Zwischenstand in SharePoint gespeichert'); }
     else if (m.type === 'ti-save-error') { toast('Speichern fehlgeschlagen' + (m.msg ? ': ' + m.msg : '')); }
   });
