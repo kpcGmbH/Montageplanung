@@ -1716,7 +1716,7 @@
   // Urlaub (interne Vacation-Balken) und Buchung (externe). Basis für Doppelbuchungs-Anzeige.
   function weekDerived() {
     const map = {};
-    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], labels: [], addrs: [], urlaub: false, booking: false, unconfirmed: false }); };
+    const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], labels: [], addrs: [], ti: [], urlaub: false, booking: false, unconfirmed: false }); };
     const eachWorkday = (s, e, cb) => {
       for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
     };
@@ -1733,12 +1733,15 @@
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
         const unconf = effCat(row, bar) === 'preplanning';   // „Vorplanung / nicht bestätigt"
+        // Ziel für das ✉ in der Zelle: Einladung des Gewerks (Phase), bei Bauleitung die der Montage / des Projekts
+        const realPh = !!(bar.phases && bar.phases.length);
+        const addTi = (c, phIdx) => { if (!c.ti.some(t => t.bar === bar && t.phIdx === phIdx)) c.ti.push({ row, bar, phIdx, shown }); };
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, realPh ? phases.indexOf(ph) : -1); if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, -1); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
       }
     }
@@ -2084,6 +2087,27 @@
         }
         if (proj.length && der.addrs && der.addrs.length) title += (title ? '\n' : '') + der.addrs.join('\n');
         if (title) cell.title = title;
+        // ✉ Termineinladung direkt aus der Zelle: für das Gewerk, in dem die Person an dem Tag eingeplant ist
+        if (proj.length && der.ti && der.ti.length) {
+          const openTi = (t) => openTermineinladung(t.row, (t.phIdx >= 0 || isKleinRow(t.row)) ? t.bar : null, t.phIdx);
+          const tiLabel = (t) => t.shown + ((t.phIdx >= 0 && TRADES()[t.bar.phases[t.phIdx].trade]) ? ' · ' + TRADES()[t.bar.phases[t.phIdx].trade].label : '');
+          const ti = el('span', 'wk-cell-ti', '✉');
+          ti.title = 'Termineinladung' + (der.ti.length === 1 ? ' · ' + tiLabel(der.ti[0]) : ' (Auswahl)');
+          ti.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (der.ti.length === 1) { openTi(der.ti[0]); return; }
+            closeNeedMenu();
+            needMenu = el('div', 'need-menu');
+            needMenu.appendChild(el('div', 'need-menu-head', 'Termineinladung für …'));
+            for (const t of der.ti) { const b = el('button', 'need-menu-item'); b.appendChild(el('span', null, tiLabel(t))); b.onclick = () => { closeNeedMenu(); openTi(t); }; needMenu.appendChild(b); }
+            document.body.appendChild(needMenu);
+            needMenu.style.left = Math.max(8, Math.min(e.clientX, window.innerWidth - needMenu.offsetWidth - 8)) + 'px';
+            needMenu.style.top = (e.clientY + 4) + 'px';
+            setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
+          });
+          cell.classList.add('wk-has-ti');
+          cell.appendChild(ti);
+        }
         // Baustellen-Einsatz (aus dem Zeitplan) lässt sich taggenau auf eine andere Person/einen anderen Tag ziehen
         // (nur Monteure – Bauleitung wird nicht per Gewerk-Phase verschoben)
         if (proj.length && !note && !der.urlaub && p.kind !== 'bauleiter') {

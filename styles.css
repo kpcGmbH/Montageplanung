@@ -664,3 +664,11 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 
 .phase-ti { color: var(--copper); cursor: pointer; padding: 6px 5px; border-radius: 4px; font-size: 13px; align-self: center; opacity: .8; }
 .phase-ti:hover { opacity: 1; background: #fbf1e6; }
+
+/* Woche: ✉ in der Einsatz-Zelle */
+.wk-cell.wk-has-ti { position: relative; padding-right: 22px; }
+.wk-cell-ti { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 12px; line-height: 1; padding: 3px 3px; border-radius: 4px; color: var(--copper-dark); opacity: .45; cursor: pointer; }
+.wk-cell:hover .wk-cell-ti { opacity: .8; }
+.wk-cell-ti:hover { opacity: 1 !important; background: rgba(255,255,255,.75); }
+.wk-cell.wk-conflict .wk-cell-ti, .wk-cell.t-bauleitung .wk-cell-ti { color: #fff; }
+.wk-cell.wk-conflict .wk-cell-ti:hover, .wk-cell.t-bauleitung .wk-cell-ti:hover { color: var(--copper-dark); }
