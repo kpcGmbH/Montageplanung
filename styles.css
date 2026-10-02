@@ -637,3 +637,6 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .hist-user { color: var(--copper, #895612); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hist-text { color: #2b2f33; }
 .hist-empty { padding: 20px; text-align: center; color: var(--muted, #676C6F); }
+
+.f-bl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.f-bl-chips .trade-chip { cursor: pointer; }

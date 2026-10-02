@@ -306,7 +306,7 @@
     for (const g of PLAN.groups) {
       if (g.name !== 'Projekte') continue;
       for (const r of g.rows) { if (r.archived) continue; for (const bar of r.bars) {
-        if (bar.cat === 'vacation' || bar.cat === 'subcontractor') continue;
+        if (bar.cat === 'vacation' || bar.cat === 'subcontractor' || bar.cat === 'bauleitung') continue;
         if (bar.phases && bar.phases.length) {
           // Gewerk-Phasen: jede Phase belegt ihre eigenen Arbeitstage mit ihrer Personenzahl (feste Lage)
           for (const ph of bar.phases) {
@@ -1021,6 +1021,27 @@
     const o = el('option', null, PLAN.categories[key].label); o.value = key; fCat.appendChild(o);
   }
 
+  // Bauleitung am Fenster (Arbeitskopie: gewählte Bauleiter-IDs). Kategorie „Bauleitung" = Termin ohne Monteure.
+  let blDraft = new Set();
+  function renderBlChips() {
+    const box = document.getElementById('f-bl'); box.innerHTML = '';
+    const rows = bauleiterRows();
+    if (!rows.length) { box.appendChild(el('span', 'phase-hint', 'Noch keine Bauleiter angelegt (Button „Bauleiter" oben).')); return; }
+    for (const r of rows) {
+      const on = blDraft.has(r.id), chip = el('span', 'trade-chip' + (on ? ' on' : ''), r.label || 'Bauleiter');
+      if (on) chip.style.background = '#7e57c2';
+      chip.onclick = () => { if (on) blDraft.delete(r.id); else blDraft.add(r.id); renderBlChips(); };
+      box.appendChild(chip);
+    }
+  }
+  function applyCatMode() {
+    if (!current) return;
+    const proj = current.row.capRole !== 'extern' && current.row.capRole !== 'monteur';
+    document.getElementById('f-crew-wrap').style.display = (proj && fCat.value !== 'bauleitung') ? '' : 'none';   // Bauleitungs-Termin: keine Monteur-Phasen
+    document.getElementById('f-bl-wrap').style.display = proj ? '' : 'none';
+  }
+  fCat.addEventListener('change', applyCatMode);
+
   // Montage-Phasen (Arbeitskopie während der Dialog offen ist)
   const fPhases = document.getElementById('f-phases');
   let phaseDraft = [];
@@ -1128,7 +1149,8 @@
     for (const k of ADDR_KEYS) document.getElementById('f-' + k).value = klein ? (bar[k] || '') : '';
     if (klein) { fillKleinList(); fLabel.setAttribute('list', 'kleinList'); } else fLabel.removeAttribute('list');
     // Kontextabhängige Felder
-    document.getElementById('f-crew-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';   // Montage-Phasen nur bei Projekten
+    blDraft = new Set(blRanges(bar).map(r => r.id)); renderBlChips();
+    applyCatMode();   // Montage-Phasen nur bei Projekten (nicht bei Kategorie „Bauleitung"), Bauleitung nur bei Projekten
     document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
     document.getElementById('f-ti').style.display = (isExtern || isMonteur) ? 'none' : '';          // Termineinladung nur bei Projekt-Montagen
@@ -1157,6 +1179,9 @@
   document.getElementById('f-save').onclick = () => {
     if (!current) return;
     const { row, bar } = current;
+    const blOnly = !row.capRole && fCat.value === 'bauleitung';
+    if (blOnly && phaseDraft.some(p => (p.assigned || []).length)
+      && !confirm('Kategorie „Bauleitung": Diesem Termin werden keine Monteure zugeordnet.\nDie vorhandenen Monteur-Phasen werden entfernt. Fortfahren?')) return;
     delete bar.weekgen;   // manuell bearbeitet → als echtes Fenster behandeln (nicht mehr als Woche-Fragment auto-aufräumen)
     bar.label = fLabel.value.trim();
     if (isKleinRow(row)) setAddr(bar, { strasse: document.getElementById('f-strasse').value, plz: document.getElementById('f-plz').value, ort: document.getElementById('f-ort').value });
@@ -1175,7 +1200,7 @@
     } else {
       // Projekt-Fenster: kein eigener Bedarf mehr – alles steckt in den Phasen
       bar.cat = fCat.value;
-      bar.phases = phaseDraft.length
+      bar.phases = (phaseDraft.length && !blOnly)
         ? phaseDraft.map(p => {
             const weekend = !!p.weekend;
             const daysN = Math.max(1, Math.round(+p.days || 1));
@@ -1192,10 +1217,22 @@
           })
         : undefined;
       delete bar.crew;
+      // Bauleitung: abgewählte entfernen, taggenaue Bereiche (aus der Woche) aufs Fenster begrenzen, neue = ganzes Fenster
+      const bl = [];
+      for (const id of blDraft) {
+        const had = (bar.bl || []).filter(a => idOf(a) === id).map(a => {
+          if (typeof a === 'string') return a;
+          const rs = a.start > s ? a.start : s, re = a.end < e ? a.end : e;
+          return rs > re ? null : { id, start: rs, end: re };
+        }).filter(Boolean);
+        if (had.length) bl.push(...had); else bl.push(id);
+      }
+      if (bl.length) bar.bl = bl; else delete bar.bl;
     }
     const rowNm = row.site || row.label, barNm = bar.label || '(ohne Bezeichnung)';
     const asgNames = (bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)).filter((v, i, a) => a.indexOf(v) === i).map(monteurName);
-    const who = asgNames.length ? ' · Monteure: ' + asgNames.join(', ') : '';
+    const blNames = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
+    const who = (asgNames.length ? ' · Monteure: ' + asgNames.join(', ') : '') + (blNames.length ? ' · Bauleitung: ' + blNames.join(', ') : '');
     logChange(`Termin „${barNm}" (${rowNm}) ${current.isNew ? 'angelegt' : 'bearbeitet'} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}${who}`, 'zeitplan');
     save(); render(); closeEditor();
   };
@@ -2184,10 +2221,13 @@
   };
   // Fenster für einen Woche-Eintrag finden/erzeugen: bestehendes Fenster am Tag, sonst angrenzendes
   // per Woche erzeugtes Fenster erweitern (zusammenhängend), sonst neues weekgen-Fenster.
-  function weekBarFor(row, ms) {
+  function weekBarFor(row, ms, forBl) {
     const dISO = isoStr(ms);
     const isEinsatz = (b) => b.cat !== 'vacation' && b.cat !== 'booking';
-    let bar = row.bars.find(b => parse(b.start) <= ms && parse(b.end) >= ms && isEinsatz(b));
+    const onDay = (b) => parse(b.start) <= ms && parse(b.end) >= ms && isEinsatz(b);
+    // Bauleiter: bevorzugt ein Bauleitungs-Fenster des Tages. Monteure: nie in ein (festes) Bauleitungs-Fenster.
+    let bar = forBl ? (row.bars.find(b => onDay(b) && b.cat === 'bauleitung') || row.bars.find(onDay))
+      : row.bars.find(b => onDay(b) && (b.cat !== 'bauleitung' || b.weekgen));
     if (!bar) {
       const dayBefore = isoStr(addDays(ms, -1)), dayAfter = isoStr(addDays(ms, 1));
       bar = row.bars.find(b => b.weekgen && (b.end === dayBefore || b.start === dayAfter));
@@ -2220,11 +2260,12 @@
     }
     return bar;
   }
-  const weekEntryBar = (row, ms, entry) => (entry && isKleinRow(row)) ? kleinBarFor(row, ms, entry) : weekBarFor(row, ms);
+  const weekEntryBar = (row, ms, entry, forBl) => (entry && isKleinRow(row)) ? kleinBarFor(row, ms, entry) : weekBarFor(row, ms, forBl);
   // Person an einem Tag einem Projekt/Gewerk zuordnen (schreibt in den Zeitplan)
   function assignWeekProject(pid, ms, row, gewerk, entry) {
     const dISO = isoStr(ms);
     const bar = weekEntryBar(row, ms, entry);
+    if (bar.cat === 'bauleitung') { bar.cat = 'confirmed'; if (bar.label === 'Bauleitung') bar.label = 'Montage'; }   // Monteur dazu → wird zur Montage
     if (bar.crew) { if ((bar.crew.assigned || []).length || bar.crew.trade) phasesOf(bar); else delete bar.crew; }
     if (!bar.phases) bar.phases = [];
     const weekendDay = [0, 6].includes(new Date(ms).getUTCDay());
@@ -2242,7 +2283,10 @@
   }
   // Bauleiter an einem Tag einer Baustelle zuordnen (Bauleitung – ohne Gewerk; schreibt in den Zeitplan)
   function assignBauleitung(blId, ms, row, entry) {
-    const bar = weekEntryBar(row, ms, entry);
+    const before = row.bars.length;
+    const bar = weekEntryBar(row, ms, entry, true);
+    // Neu aus der Woche erzeugt: reiner Bauleitungs-Termin (kein Monteur-Bedarf, nicht unter „Bestätigte Montagen")
+    if (row.bars.length > before) { bar.cat = 'bauleitung'; if (bar.label === 'Montage') bar.label = 'Bauleitung'; }
     addToBl(bar, blId, isoStr(ms));
     save();
   }

@@ -11,6 +11,7 @@ const PLAN = {
     confirmed:    { label: 'Bestätigter Projekttermin',          fill: '#62a92f', border: '#46801f', text: '#10300a' },
     subcontractor:{ label: 'Externe Montage (Nachunternehmer)',  fill: '#f3d011', border: '#c9a800', text: '#3a3000' },
     preplanning:  { label: 'Vorplanung / nicht bestätigt',       fill: '#ec8a2b', border: '#c46a14', text: '#3a1f00' },
+    bauleitung:   { label: 'Bauleitung (ohne Monteure)',         fill: '#7e57c2', border: '#5e3aa6', text: '#ffffff' },
     vacation:     { label: 'Urlaub',                             fill: '#39c0d8', border: '#1f97ad', text: '#053038' },
     booking:      { label: 'Externe Trupps (Buchung)',           fill: '#b39ddb', border: '#8f77c4', text: '#2b1e52' },
   },
