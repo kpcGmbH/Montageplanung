@@ -74,8 +74,59 @@
   }
   function undo() { if (!undoStack.length) return; logChange('Änderung rückgängig gemacht'); redoStack.push(histPrev); applyHistState(undoStack.pop()); }
   function redo() { if (!redoStack.length) return; logChange('Änderung wiederholt'); undoStack.push(histPrev); applyHistState(redoStack.pop()); }
+  // Ein Montagefenster umfasst immer alle seine Einsätze – sonst wären sie im Zeitplan unsichtbar, während die
+  // Woche sie trotzdem zeigt. fitBar erweitert das Fenster auf Phasen + Bauleitung (nie kürzen). true = angepasst.
+  function fitBar(bar) {
+    const lo = (a, b) => (parse(b) < parse(a) ? b : a), hi = (a, b) => (parse(b) > parse(a) ? b : a);
+    let bs = bar.start, be = bar.end;
+    for (const ph of (bar.phases || [])) if (ph.start && ph.end) { bs = lo(bs, ph.start); be = hi(be, ph.end); }
+    for (const a of (bar.bl || [])) if (a && typeof a !== 'string' && a.start && a.end) { bs = lo(bs, a.start); be = hi(be, a.end); }
+    if (bs === bar.start && be === bar.end) return false;
+    bar.start = bs; bar.end = be;
+    return true;
+  }
+  // Taggenaue Zuordnungen außerhalb ihrer Phase (z. B. nach dem Kürzen eines Fensters oder Ziehen in der Woche):
+  // direkt angrenzend → Phase verlängern; mit Lücke → eigenes Montagefenster, damit kein Bedarf in der Lücke entsteht.
+  function splitStray(row, bar) {
+    const day = (iso, n) => isoStr(addDays(parse(iso), n));
+    const made = [];
+    for (const ph of (bar.phases || [])) {
+      if (!ph.start) continue;
+      if (!ph.end) ph.end = ph.start;
+      const S = parse(ph.start), E = parse(ph.end), keep = [], before = [], after = [];
+      for (const a of (ph.assigned || [])) {
+        if (!a || typeof a === 'string' || !a.start || !a.end) { keep.push(a); continue; }
+        const rs = parse(a.start), re = parse(a.end);
+        if (rs >= S && re <= E) { keep.push(a); continue; }
+        if (re >= S && rs <= E) keep.push({ id: a.id, start: rs < S ? ph.start : a.start, end: re > E ? ph.end : a.end });
+        if (rs < S) before.push({ id: a.id, start: a.start, end: re < S ? a.end : day(ph.start, -1) });
+        if (re > E) after.push({ id: a.id, start: rs > E ? a.start : day(ph.end, 1), end: a.end });
+      }
+      if (!before.length && !after.length) continue;
+      const workBetween = (fromISO, toISO) => { let n = 0; for (let ms = parse(fromISO); ms <= parse(toISO); ms = addDays(ms, 1)) if (ph.weekend || isWorkdayMs(ms)) n++; return n; };
+      const handle = (segs, isAfter) => {
+        if (!segs.length) return;
+        const gs = segs.map(x => x.start).sort()[0], ge = segs.map(x => x.end).sort().pop();
+        const gap = isAfter ? workBetween(day(ph.end, 1), day(gs, -1)) : workBetween(day(ge, 1), day(ph.start, -1));
+        if (!gap) { if (isAfter) ph.end = ge; else ph.start = gs; keep.push(...segs); return; }   // angrenzend → verlängern
+        const nb = { label: bar.label || '', cat: bar.cat, start: gs, end: ge,
+          phases: [{ trade: ph.trade, start: gs, end: ge, days: daysCount(gs, ge, !!ph.weekend), weekend: !!ph.weekend, count: new Set(segs.map(x => x.id)).size, assigned: segs }] };
+        for (const k of ['strasse', 'plz', 'ort', 'ti']) if (bar[k]) nb[k] = bar[k];
+        made.push(nb);
+      };
+      handle(before, false); handle(after, true);
+      ph.assigned = keep;
+      ph.days = isHalf(ph) && Math.ceil(+ph.days) === daysCount(ph.start, ph.end, !!ph.weekend) ? ph.days : daysCount(ph.start, ph.end, !!ph.weekend);
+    }
+    for (const nb of made) row.bars.push(nb);
+  }
+  function fitWindows() {
+    const g = PLAN.groups.find(x => x.name === 'Projekte'); if (!g) return;
+    for (const row of g.rows) for (const bar of (row.bars || []).slice()) if (bar.start && bar.end) { splitStray(row, bar); fitBar(bar); }
+  }
   function save() {
     pruneEmptyWeekBars();   // leere Woche-Fragmente entfernen
+    fitWindows();           // kein Einsatz außerhalb seines Fensters
     ensureIds();   // neue Balken/Phasen bekommen stabile IDs vor dem Sync (fürs Zusammenführen)
     saveLocal();
     const snap = snapshot(), json = JSON.stringify(snap);
@@ -994,6 +1045,7 @@
             }
             if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
           }
+          if (mode !== 'move' && fitBar(bar)) toast('Das Fenster kann nicht kürzer sein als die darin geplanten Einsätze – zuerst die Phase kürzen.');
           const rowNm = b._row.site || b._row.label, barNm = bar.label || '(ohne Bezeichnung)';
           const verb = mode === 'move' ? 'verschoben' : 'Dauer geändert';
           logChange(`Einsatz „${barNm}" (${rowNm}) ${verb} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}`, 'zeitplan');
@@ -1240,6 +1292,7 @@
         if (had.length) bl.push(...had); else bl.push(id);
       }
       if (bl.length) bar.bl = bl; else delete bar.bl;
+      if (fitBar(bar)) toast('Montagefenster auf die geplanten Einsätze erweitert (' + fmt(parse(bar.start)) + '–' + fmt(parse(bar.end)) + ').');
     }
     const rowNm = row.site || row.label, barNm = bar.label || '(ohne Bezeichnung)';
     const asgNames = (bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)).filter((v, i, a) => a.indexOf(v) === i).map(monteurName);
@@ -2788,6 +2841,7 @@
   load();
   migrateTeamResources();
   seedCrew();
+  fitWindows();
   ensureIds();
   saveLocal();
   buildLegend();
@@ -2800,7 +2854,7 @@
     Cloud.onSnapshot(() => snapshot());   // liefert cloud.js den aktuellen lokalen Stand fürs Zusammenführen
     // Stand aus der Cloud anwenden (Erststand ODER Hintergrund-Merge). Bei Merge bleibt der Undo-Verlauf bestehen.
     Cloud.onApply((data, mode) => {
-      applySnapshot(data); migrateTeamResources(); seedCrew(); ensureIds();
+      applySnapshot(data); migrateTeamResources(); seedCrew(); fitWindows(); ensureIds();
       if (mode !== 'merge') scrollTodayPending = true;   // Erststand aus der Cloud → auf aktuelle Woche springen
       saveLocal(); buildLegend(); render();
       if (mode === 'merge') updateUndoUI(); else histReset();
