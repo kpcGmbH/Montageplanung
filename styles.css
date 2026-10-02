@@ -687,3 +687,12 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .wk-cell.wk-car-cell:hover { outline: none; }
 .wk-cell.wk-car-cell.used { background: #eef5f6; color: #2d5560; }
 .wk-cell.wk-car-cell.over { background: #f6dcd8; color: #a12b1e; font-weight: 700; }
+
+/* Woche: Marken am rechten Zellenrand (🌙 Übernachtung · Fahrzeug · ✉) */
+.wk-cell.wk-has-badges { position: relative; }
+.wk-badges { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 4px; }
+.wk-badges .wk-car, .wk-badges .wk-cell-ti { position: static; transform: none; }
+.wk-night { font-size: 11px; line-height: 1; }
+.wk-site-night { margin-left: 8px; font-weight: 600; font-size: 10.5px; color: #3b4a6b; }
+.dialog label.w-check { flex-direction: row; align-items: center; gap: 7px; font-size: 12px; color: var(--ink); cursor: pointer; }
+.dialog label.w-check input { width: auto; margin: 0; }

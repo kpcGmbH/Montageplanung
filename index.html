@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=103">
+  <link rel="stylesheet" href="styles.css?v=104">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -99,6 +99,7 @@
       <label id="w-car-wrap">Fahrzeug an diesem Tag
         <select id="w-car"></select>
       </label>
+      <label class="w-check"><input id="w-night" type="checkbox"> 🌙 Übernachtung nach diesem Tag</label>
       <div class="dialog-actions">
         <button id="w-delete" class="btn danger">Löschen</button>
         <button id="w-week" class="btn" title="Diesen Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen">Ganze Woche</button>
@@ -239,6 +240,9 @@
         <div id="f-phases"></div>
         <button type="button" id="f-phase-add" class="btn">+ Phase</button>
       </fieldset>
+      <label id="f-hotel-wrap">Hotel / Unterkunft <span class="w-hint">(für Übernachtungen dieses Fensters)</span>
+        <input id="f-hotel" type="text" placeholder="z. B. Hotel Adler, Hauptstraße 5">
+      </label>
       <fieldset class="crew" id="f-bl-wrap">
         <legend>Bauleitung</legend>
         <div id="f-bl" class="f-bl-chips"></div>
@@ -276,8 +280,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=103"></script>
-  <script src="cloud.js?v=103"></script>
-  <script src="app.js?v=103"></script>
+  <script src="data.js?v=104"></script>
+  <script src="cloud.js?v=104"></script>
+  <script src="app.js?v=104"></script>
 </body>
 </html>

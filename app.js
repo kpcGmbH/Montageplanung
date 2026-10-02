@@ -44,7 +44,7 @@
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
     const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, ti: r.ti, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
-    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), changelog: (PLAN.changelog || []) };
+    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), nights: (PLAN.nights || {}), changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
     if (data && Array.isArray(data.groups) && data.groups.length) PLAN.groups = data.groups;
@@ -53,6 +53,7 @@
     // Fuhrpark (Katalog) + Fahrzeug je Person/Tag; fehlt der Katalog im Stand, bleibt der aus data.js
     if (data && Array.isArray(data.vehicles) && data.vehicles.length) PLAN.vehicles = data.vehicles;
     if (data && data.cars && typeof data.cars === 'object') PLAN.cars = data.cars; else PLAN.cars = PLAN.cars || {};
+    if (data && data.nights && typeof data.nights === 'object') PLAN.nights = data.nights; else PLAN.nights = PLAN.nights || {};
     // Changelog (Änderungsverlauf) – geteilt über den 3-Wege-Merge (Array-Vereinigung über id)
     if (data && Array.isArray(data.changelog)) PLAN.changelog = data.changelog;
     else PLAN.changelog = PLAN.changelog || [];
@@ -114,7 +115,8 @@
         if (!gap) { if (isAfter) ph.end = ge; else ph.start = gs; keep.push(...segs); return; }   // angrenzend → verlängern
         const nb = { label: bar.label || '', cat: bar.cat, start: gs, end: ge,
           phases: [{ trade: ph.trade, start: gs, end: ge, days: daysCount(gs, ge, !!ph.weekend), weekend: !!ph.weekend, count: new Set(segs.map(x => x.id)).size, assigned: segs }] };
-        for (const k of ['strasse', 'plz', 'ort', 'ti']) if (bar[k]) nb[k] = bar[k];
+        if (ph.overnight) nb.phases[0].overnight = true;
+        for (const k of ['strasse', 'plz', 'ort', 'ti', 'hotel']) if (bar[k]) nb[k] = bar[k];
         made.push(nb);
       };
       handle(before, false); handle(after, true);
@@ -1129,6 +1131,9 @@
       von.onchange = () => { ph.start = von.value || ph.start; refreshEnd(); };
       dur.oninput = () => { ph.days = halfDays(String(dur.value).replace(',', '.')); refreshEnd(); };
       wkc.onchange = () => { ph.weekend = wkc.checked; refreshEnd(); };
+      const ngc = document.createElement('input'); ngc.type = 'checkbox'; ngc.checked = !!ph.overnight;
+      ngc.title = 'Mit Übernachtung: Vorgabe für alle Monteure dieser Phase (jede Nacht, auf die ein weiterer Einsatztag folgt). In der Woche je Person und Tag änderbar.';
+      ngc.onchange = () => { ph.overnight = ngc.checked; };
       cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
       const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
       // Termineinladung nur für dieses Gewerk (eigener Entwurf): speichert die Maske und öffnet die Einladung der Phase
@@ -1144,8 +1149,9 @@
       const vonL = el('label', 'phase-fld', 'Start'); vonL.appendChild(von);
       const durL = el('label', 'phase-fld phase-cnt', 'Montagetage'); durL.appendChild(dur);
       const wkL = el('label', 'phase-fld phase-wk', 'Sa/So'); wkL.appendChild(wkc);
+      const ngL = el('label', 'phase-fld phase-wk', '🌙 Übern.'); ngL.title = ngc.title; ngL.appendChild(ngc);
       const cntL = el('label', 'phase-fld phase-cnt', 'Pers.'); cntL.appendChild(cnt);
-      line2.appendChild(vonL); line2.appendChild(durL); line2.appendChild(wkL); line2.appendChild(cntL); line2.appendChild(pti); line2.appendChild(del);
+      line2.appendChild(vonL); line2.appendChild(durL); line2.appendChild(wkL); line2.appendChild(ngL); line2.appendChild(cntL); line2.appendChild(pti); line2.appendChild(del);
       refreshEnd();
       // Monteur-Zuordnung – nur nach Gewerk qualifizierte
       const asgTitle = el('div', 'assign-title', '');
@@ -1217,6 +1223,8 @@
     if (klein) { fillKleinList(); fLabel.setAttribute('list', 'kleinList'); } else fLabel.removeAttribute('list');
     // Kontextabhängige Felder
     blDraft = new Set(blRanges(bar).map(r => r.id)); renderBlChips();
+    document.getElementById('f-hotel').value = bar.hotel || '';
+    document.getElementById('f-hotel-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';
     applyCatMode();   // Montage-Phasen nur bei Projekten (nicht bei Kategorie „Bauleitung"), Bauleitung nur bei Projekten
     document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
@@ -1228,7 +1236,7 @@
       phaseDraft = bar.phases.map(p => {
         const weekend = !!p.weekend;
         const daysN = +p.days > 0 ? p.days : daysCount(p.start, p.end || p.start, weekend);
-        return { trade: p.trade || 'edelstahl', start: p.start, days: daysN, weekend, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned) };
+        return { trade: p.trade || 'edelstahl', start: p.start, days: daysN, weekend, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned), overnight: !!p.overnight };
       });
     } else if (bar.crew && ((bar.crew.assigned || []).length || bar.crew.trade)) {
       // Alt-Bedarf nur übernehmen, wenn er wirklich etwas enthält (Gewerk oder zugeordnete Monteure).
@@ -1280,7 +1288,7 @@
               if (rs > re) return null;
               return (rs === s && re === e) ? a.id : { id: a.id, start: rs, end: re };
             }).filter(Boolean);
-            return { trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg };
+            return Object.assign({ trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg }, p.overnight ? { overnight: true } : {});
           })
         : undefined;
       delete bar.crew;
@@ -1295,6 +1303,8 @@
         if (had.length) bl.push(...had); else bl.push(id);
       }
       if (bl.length) bar.bl = bl; else delete bar.bl;
+      const hotel = document.getElementById('f-hotel').value.trim();
+      if (hotel) bar.hotel = hotel; else delete bar.hotel;
       if (fitBar(bar)) toast('Montagefenster auf die geplanten Einsätze erweitert (' + fmt(parse(bar.start)) + '–' + fmt(parse(bar.end)) + ').');
     }
     const rowNm = row.site || row.label, barNm = bar.label || '(ohne Bezeichnung)';
@@ -1721,6 +1731,17 @@
     for (const p of weekPeople()) { const v = effVeh(p.id, iso, derived); if (v) (occ[v.id] = occ[v.id] || []).push(p.name); }
     return occ;
   }
+  // ---- Übernachtungen: Nacht NACH einem Tag, je Person ----
+  // Vorgabe aus der Phase („mit Übernachtung": jede Nacht, auf die ein weiterer Einsatztag der Person folgt),
+  // in der Woche je Person/Tag überschreibbar: PLAN.nights['pid|Datum'] = 1 (ja) / 0 (nein).
+  function effNight(key, der) {
+    const x = (PLAN.nights || {})[key];
+    return x === 1 ? true : x === 0 ? false : !!(der && der.nightDef);
+  }
+  function setNight(key, on, der) {
+    PLAN.nights = PLAN.nights || {};
+    if (!!on === !!(der && der.nightDef)) delete PLAN.nights[key]; else PLAN.nights[key] = on ? 1 : 0;
+  }
   const vehLabel = (v) => v.name + (v.note ? ' (' + v.note + ')' : '');
   // Auswahl aus der Maske speichern: entspricht sie der Vorauswahl (Stammfahrzeug bzw. keines), bleibt kein Eintrag.
   function setCar(pid, iso, val) {
@@ -1834,7 +1855,12 @@
         if (realPh) phases.forEach((ph, i) => assignedRanges(ph).forEach(r => { const a = (phOf[r.id] = phOf[r.id] || []); if (a.indexOf(i) < 0) a.push(i); }));
         const addTi = (c, pid) => { if (!c.ti.some(x => x.bar === bar)) c.ti.push({ row, bar, phIdxs: pid ? (phOf[pid] || []) : [], shown }); };
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, r.id); if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, r.id);
+            if (bar.hotel && !c.hotel) c.hotel = bar.hotel;
+            // Übernachtung als Vorgabe, wenn die Person am Folgetag in derselben Phase weiterarbeitet
+            // (Zuordnungen können taggenau zerstückelt sein → über alle Bereiche der Person prüfen)
+            const nx = addDays(ms, 1);
+            if (ph.overnight && (ph.weekend || isWorkdayMs(nx)) && assignedRanges(ph).some(q => q.id === r.id && parse(q.start) <= nx && parse(q.end) >= nx)) c.nightDef = true; if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
@@ -1887,12 +1913,12 @@
         if (parse(bar.start) > w1 || parse(bar.end) < w0) continue;
         const phases = (bar.phases && bar.phases.length) ? bar.phases
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned, weekend: false }] : []);
-        const perDay = []; let anyGap = false, anyActive = false, anyPlanned = false, anyStaffed = false;
+        const perDay = [], perDayIds = []; let anyGap = false, anyActive = false, anyPlanned = false, anyStaffed = false;
         for (let i = 0; i < 7; i++) {
           const ms = wdays[i], dow = new Date(ms).getUTCDay(), weekendDay = (dow === 0 || dow === 6);
           const inWindow = parse(bar.start) <= ms && parse(bar.end) >= ms;
           if (!inWindow) { perDay.push(null); continue; }
-          const ids = new Set(); let phaseActive = false;
+          const ids = new Set(); let phaseActive = false; perDayIds[i] = ids;
           for (const ph of phases) {
             if (parse(ph.start) <= ms && parse(ph.end) >= ms) {
               phaseActive = true;
@@ -1912,7 +1938,7 @@
           perDay.push(n);
         }
         if (!confirmed && !anyStaffed) continue;
-        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, anyGap, anyPlanned, unconfirmed: !confirmed, row, bar });
+        if (anyActive) out.push({ name: weekName(row, bar), sub: isKleinRow(row) ? '' : (bar.label || ''), perDay, perDayIds, anyGap, anyPlanned, unconfirmed: !confirmed, row, bar });
       }
     }
     // Reine Fenster (in dieser Woche kein Einsatz geplant) ans Ende – oben stehen die laufenden Montagen
@@ -2091,8 +2117,11 @@
             cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
           } else {
             cell.classList.add('wk-site-ok'); cell.textContent = n + '×';
+            // Übernachtungen dieser Baustelle in der Nacht nach dem Tag (= zu buchende Betten)
+            const dIso = isoStr(ms), nn = [...(s.perDayIds[i] || [])].filter(id => effNight(akey(id, dIso), derived[akey(id, dIso)])).length;
+            if (nn) { cell.appendChild(el('span', 'wk-site-night', '🌙 ' + nn)); }
             if (s.unconfirmed) cell.classList.add('wk-site-unconf');
-            cell.title = n + ' Monteur' + (n > 1 ? 'e' : '') + ' eingeplant' + (s.unconfirmed ? ' – Termin noch nicht bestätigt' : '') + ' · klicken zum Bearbeiten';
+            cell.title = n + ' Monteur' + (n > 1 ? 'e' : '') + ' eingeplant' + (nn ? ' · ' + nn + ' Übernachtung' + (nn > 1 ? 'en' : '') + (s.bar.hotel ? ' (' + s.bar.hotel + ')' : '') : '') + (s.unconfirmed ? ' – Termin noch nicht bestätigt' : '') + ' · klicken zum Bearbeiten';
             cell.addEventListener('click', () => openEditor(s.row, s.bar, false));
           }
           grid.appendChild(cell);
@@ -2190,12 +2219,13 @@
           const occ = occByDay[i][veh.id] || [], over = occ.length > (+veh.seats || 0);
           title += (title ? '\n' : '') + '🚐 ' + vehLabel(veh) + ' · ' + occ.length + '/' + veh.seats + ' Sitze: ' + occ.join(', ') + (over ? '\n⚠ Mehr Personen als Sitze!' : '');
         }
+        const night = effNight(key, der) && (proj.length || (note && !noteAbsence));
+        if (night) title += (title ? '\n' : '') + '🌙 Übernachtung nach diesem Tag' + (der.hotel ? ' · ' + der.hotel : '');
         if (title) cell.title = title;
-        if (veh) {
-          const occ = occByDay[i][veh.id] || [];
-          cell.classList.add('wk-has-car');
-          cell.appendChild(el('span', 'wk-car' + (occ.length > (+veh.seats || 0) ? ' over' : ''), veh.name));
-        }
+        // Marken am rechten Zellenrand: 🌙 Übernachtung · Fahrzeug · ✉
+        const badges = el('span', 'wk-badges');
+        if (night) badges.appendChild(el('span', 'wk-night', '🌙'));
+        if (veh) badges.appendChild(el('span', 'wk-car' + ((occByDay[i][veh.id] || []).length > (+veh.seats || 0) ? ' over' : ''), veh.name));
         // ✉ Termineinladung direkt aus der Zelle: für das Gewerk, in dem die Person an dem Tag eingeplant ist
         if (proj.length && der.ti && der.ti.length) {
           const openTi = (t) => openTermineinladung(t.row, (t.phIdxs.length || isKleinRow(t.row)) ? t.bar : null, t.phIdxs);
@@ -2214,8 +2244,12 @@
             needMenu.style.top = (e.clientY + 4) + 'px';
             setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
           });
-          cell.classList.add('wk-has-ti');
-          cell.appendChild(ti);
+          badges.appendChild(ti);
+        }
+        if (badges.childNodes.length) {
+          cell.classList.add('wk-has-badges');
+          cell.style.paddingRight = (8 + (night ? 18 : 0) + (veh ? 46 : 0) + (badges.querySelector('.wk-cell-ti') ? 16 : 0)) + 'px';
+          cell.appendChild(badges);
         }
         // Baustellen-Einsatz (aus dem Zeitplan) lässt sich taggenau auf eine andere Person/einen anderen Tag ziehen
         // (nur Monteure – Bauleitung wird nicht per Gewerk-Phase verschoben)
@@ -2561,6 +2595,7 @@
     // Vorauswahl: die gespeicherte Wahl, sonst das Stammfahrzeug. Gespeichert wird nur, was davon abweicht.
     wCar.value = (PLAN.cars || {})[key] || (def ? def.id : 'none');
     document.getElementById('w-car-wrap').style.display = vehicles().length ? '' : 'none';
+    document.getElementById('w-night').checked = effNight(key, allDer[key]);
     const blank = !note && !der.projects.length && !der.urlaub;
     wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
@@ -2602,13 +2637,18 @@
     const carOld = (PLAN.cars || {})[curCell] || '';
     setCar(curCellCtx.pid, curCellCtx.dISO, document.getElementById('w-car').value);
     const carNew = (PLAN.cars || {})[curCell] || '';
+    // 4) Übernachtung nach diesem Tag (Vorgabe kommt aus der Phase; gespeichert wird nur die Abweichung)
+    const nOld = effNight(curCell, weekDerived()[curCell]);   // nach dem Neusetzen der Baustellen
+    const nNew = document.getElementById('w-night').checked;
+    setNight(curCell, nNew, weekDerived()[curCell]);
+    if (nNew !== nOld) parts.push(nNew ? 'Übernachtung' : 'keine Übernachtung');
     if (carNew !== carOld) parts.push('Fahrzeug: ' + (carNew === 'none' ? 'keines' : carNew ? (vehById(carNew) || {}).name : 'Stammfahrzeug'));
     logChange(`${who} am ${day} – ${parts.length ? parts.join(' · ') : 'keine Änderung'}`, 'woche');
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-delete').onclick = () => {
     const who = cellPersonName(), day = curCellCtx ? fmt(parse(curCellCtx.dISO)) : '';
-    if (curCell) { delete assignments[curCell]; if (PLAN.cars) delete PLAN.cars[curCell]; }
+    if (curCell) { delete assignments[curCell]; if (PLAN.cars) delete PLAN.cars[curCell]; if (PLAN.nights) delete PLAN.nights[curCell]; }
     // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
     if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
     logChange(`Eintrag gelöscht (${who}, ${day})`, 'woche');
@@ -2621,6 +2661,7 @@
     if (wProjectDraft.length && CELL_TYPE_TEXT_SET.has(text)) text = '';   // Auto-Standardtext nicht mitschreiben
     if (!wProjectDraft.length && !text) { alert('Bitte zuerst einen Text eingeben oder ein Projekt wählen, das auf die ganze Woche übertragen werden soll.'); return; }
     renameKleinBars();
+    const nightDays = [];
     for (let i = 0; i < 5; i++) {
       const ms = addDays(selMonday, i);
       // Baustellen auf jeden Werktag übertragen (Bauleiter → Bauleitung, sonst Einsatz)
@@ -2628,7 +2669,11 @@
       // Manuellen Termin/Notiz zusätzlich auf jeden Werktag übertragen
       if (text) assignments[akey(curCellCtx.pid, isoStr(ms))] = { text, type: wType.value, auto: false };
       setCar(curCellCtx.pid, isoStr(ms), document.getElementById('w-car').value);
+      nightDays.push(i);
     }
+    // Übernachtung: Nächte Mo–Do wie angehakt, Freitag nie (Heimfahrt)
+    const derW = weekDerived(), nOn = document.getElementById('w-night').checked;
+    for (const i of nightDays) { const k = akey(curCellCtx.pid, isoStr(addDays(selMonday, i))); setNight(k, i < 4 && nOn, derW[k]); }
     const who = cellPersonName();
     logChange(`${who}: auf ganze Woche übertragen${wProjectDraft.length ? ' · Einsatz' : ''}${text ? ' · Termin „' + text + '"' : ''}`, 'woche');
     save(); renderWeek(); closeCellEditor();
@@ -2642,6 +2687,7 @@
       projects: wProjectDraft.map(e => { const c = { rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }; for (const k of ADDR_KEYS) if (k in e) c[k] = e[k]; return c; }),
       note: text ? { text, type: wType.value } : null,
       car: document.getElementById('w-car').value,
+      night: document.getElementById('w-night').checked,
     };
     toast('Eintrag kopiert – Zielzelle öffnen und „Einfügen"');
     closeCellEditor();
@@ -2652,6 +2698,7 @@
     wProjectDraft = clip.projects.map(e => Object.assign({}, e));
     renderProjRows();
     if (clip.car != null) document.getElementById('w-car').value = clip.car;
+    if (clip.night != null) document.getElementById('w-night').checked = !!clip.night;
     if (clip.note) { wText.value = clip.note.text; wType.value = clip.note.type; }
     else { wText.value = ''; }
     document.getElementById('w-save').click();
@@ -2752,7 +2799,7 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=53';
+  const TI_SRC = 'termineinladung.html?v=54';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
@@ -2828,6 +2875,10 @@
       pf.mitfahrer = uniq(phs.flatMap(p => (p.assigned || []).map(idOf))).map(monteurName).join(', ');
       const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
       if (bl.length) pf.bl_name = bl[0];
+      // Übernachtung geplant? (Vorgabe der Phase oder in der Woche gesetzte Nächte)
+      const pids = uniq(phs.flatMap(p => (p.assigned || []).map(idOf)));
+      const nightSet = Object.keys(PLAN.nights || {}).some(k => { const [id, d] = k.split('|'); return PLAN.nights[k] === 1 && pids.indexOf(id) >= 0 && phs.some(p => d >= p.start && d <= p.end); });
+      if (phs.some(p => p.overnight) || nightSet) pf.uebernachtung = 'Ja';
       // Fahrzeuge der eingeplanten Monteure am ersten Tag des Einsatzes
       const d0 = phs.map(p => p.start).sort()[0], der0 = {};
       pf.fahrzeug = uniq(phs.flatMap(p => (p.assigned || []).map(idOf)).map(id => { der0[akey(id, d0)] = { projects: ['x'] }; const v = effVeh(id, d0, der0); return v ? v.name : null; }).filter(Boolean)).join(', ');
