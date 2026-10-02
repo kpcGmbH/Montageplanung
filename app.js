@@ -2168,6 +2168,7 @@
       }
       if (!secOpen) continue;
       const nameCell = el('div', 'wk-name wk-person' + (p.kind === 'extern' ? ' extern' : ''));
+      nameCell.dataset.kind = p.kind;
       nameCell.appendChild(el('span', 'wk-person-name', p.name));
       // Gewerke des Monteurs als farbige Kürzel – hilft beim Besetzen von offenem Bedarf
       const ptr = (p.trades || []).filter(k => TRADES()[k]);
@@ -2317,6 +2318,121 @@
     viewport.appendChild(grid);
     viewport.scrollLeft = sl; viewport.scrollTop = st;
   }
+
+  // ---- Wochenplan der Monteure als Bild (zum Verschicken) ----
+  // Liest die Monteur-Zeilen aus der gerenderten Woche und zeichnet sie auf ein Canvas – ohne die anderen Bereiche.
+  function weekMonteurImage() {
+    const wasClosed = wkCollapsed.has('mont');
+    if (wasClosed) { wkCollapsed.delete('mont'); renderWeek(); }
+    const rows = [];
+    for (const n of viewport.querySelectorAll('.wk-name.wk-person')) {
+      if (n.dataset.kind === 'bauleiter') continue;
+      const cells = []; let e = n.nextElementSibling;
+      for (let i = 0; i < 7 && e; i++, e = e.nextElementSibling) {
+        const cs = getComputedStyle(e), unconf = e.classList.contains('wk-unconfirmed');
+        const text = [...e.childNodes].filter(x => x.nodeType === 3).map(x => x.textContent).join('').trim();
+        const ex = e.querySelector('.wk-extra'), car = e.querySelector('.wk-car');
+        cells.push({ text, extra: ex ? ex.textContent : '', car: car ? car.textContent : '', carOver: !!(car && car.classList.contains('over')), night: !!e.querySelector('.wk-night'),
+          bg: unconf ? '#fdecd9' : cs.backgroundColor, fg: unconf ? '#6b3e00' : cs.color, unconf, bold: +cs.fontWeight >= 600 });
+      }
+      rows.push({ name: n.querySelector('.wk-person-name').textContent, extern: n.classList.contains('extern'),
+        tags: [...n.querySelectorAll('.trade-tag')].map(t => ({ t: t.textContent, c: t.style.background || '#888' })), cells });
+    }
+    if (wasClosed) { wkCollapsed.add('mont'); renderWeek(); }
+    const dates = weekDates();
+    const nDays = rows.some(r => r.cells.slice(5).some(c => c.text || c.extra)) ? 7 : 5;   // Sa/So nur, wenn belegt
+    const S = 2, FONT = "'Roboto Condensed', Arial, sans-serif";
+    const W_NAME = 190, W_DAY = 220, H_TITLE = 46, H_HEAD = 30, H_ROW = 36, PAD = 14;
+    const W = PAD * 2 + W_NAME + W_DAY * nDays, H = PAD * 2 + H_TITLE + H_HEAD + H_ROW * rows.length;
+    const cv = document.createElement('canvas'); cv.width = W * S; cv.height = H * S;
+    const g = cv.getContext('2d'); g.scale(S, S); g.textBaseline = 'middle';
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    const fit = (t, max) => { if (g.measureText(t).width <= max) return t; while (t.length > 1 && g.measureText(t + '…').width > max) t = t.slice(0, -1); return t + '…'; };
+    const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+    // Titel
+    g.fillStyle = '#6b4310'; g.font = '700 19px ' + FONT;
+    g.fillText('Wochenplan Monteure · KW ' + isoWeek(selMonday), PAD, PAD + 15);
+    g.fillStyle = '#6b7177'; g.font = '400 13px ' + FONT;
+    g.fillText(fmt(selMonday) + ' – ' + fmt(addDays(selMonday, nDays - 1)) + '   ·   Stand ' + fmt(todayMs()), PAD, PAD + 35);
+    // Kopfzeile
+    let y = PAD + H_TITLE;
+    g.fillStyle = '#895612'; g.fillRect(PAD, y, W_NAME, H_HEAD);
+    g.fillStyle = '#fff'; g.font = '700 13px ' + FONT; g.fillText('Monteur', PAD + 8, y + H_HEAD / 2);
+    for (let i = 0; i < nDays; i++) {
+      const x = PAD + W_NAME + i * W_DAY;
+      g.fillStyle = i >= 5 ? '#eef1f4' : '#f4ece3'; g.fillRect(x, y, W_DAY, H_HEAD);
+      g.fillStyle = '#23272b'; g.font = '700 13px ' + FONT; g.fillText(WDAYS[i], x + 8, y + H_HEAD / 2);
+      g.fillStyle = '#7b8188'; g.font = '400 12px ' + FONT; g.fillText(fmt(dates[i]).slice(0, 6), x + 32, y + H_HEAD / 2);
+    }
+    y += H_HEAD;
+    // Zeilen
+    rows.forEach((r, ri) => {
+      const ry = y + ri * H_ROW;
+      g.fillStyle = '#fff'; g.fillRect(PAD, ry, W_NAME, H_ROW);
+      let tx = PAD + W_NAME - 6;
+      g.font = '700 10px ' + FONT;
+      for (const t of r.tags.slice().reverse()) {
+        const tw = g.measureText(t.t).width + 8; tx -= tw;
+        g.fillStyle = t.c; rr(tx, ry + H_ROW / 2 - 8, tw, 16, 4); g.fill();
+        g.fillStyle = '#fff'; g.fillText(t.t, tx + 4, ry + H_ROW / 2 + 0.5); tx -= 3;
+      }
+      g.fillStyle = r.extern ? '#1f97ad' : '#23272b'; g.font = (r.extern ? 'italic ' : '') + '400 14px ' + FONT;
+      g.fillText(fit(r.name, tx - PAD - 12), PAD + 8, ry + H_ROW / 2);
+      for (let i = 0; i < nDays; i++) {
+        const c = r.cells[i] || {}, x = PAD + W_NAME + i * W_DAY;
+        g.fillStyle = (c.text || c.extra) ? (c.bg && c.bg !== 'rgba(0, 0, 0, 0)' ? c.bg : '#fff') : (i >= 5 ? '#f6f8fa' : '#fff');
+        g.fillRect(x, ry, W_DAY, H_ROW);
+        if (c.unconf) { g.save(); g.strokeStyle = '#ec8a2b'; g.setLineDash([4, 3]); g.lineWidth = 1.2; g.strokeRect(x + 2, ry + 2, W_DAY - 4, H_ROW - 4); g.restore(); }
+        let right = x + W_DAY - 6;
+        if (c.car) {
+          g.font = '700 10px ' + FONT; const cw = g.measureText(c.car).width + 10; right -= cw;
+          g.fillStyle = c.carOver ? '#d0402e' : 'rgba(255,255,255,.9)'; rr(right, ry + H_ROW / 2 - 8, cw, 16, 8); g.fill();
+          g.strokeStyle = 'rgba(0,0,0,.2)'; g.lineWidth = 1; g.stroke();
+          g.fillStyle = c.carOver ? '#fff' : '#4a5057'; g.fillText(c.car, right + 5, ry + H_ROW / 2 + 0.5); right -= 5;
+        }
+        if (c.night) { g.font = '12px ' + FONT; right -= 15; g.fillStyle = '#23272b'; g.fillText('🌙', right, ry + H_ROW / 2 + 1); right -= 4; }
+        const maxW = right - x - 8;
+        g.fillStyle = c.fg || '#23272b';
+        if (c.extra) {
+          g.font = (c.bold ? '700 ' : '400 ') + '12px ' + FONT; g.fillText(fit(c.text + (c.unconf ? ' ?' : ''), maxW), x + 8, ry + 12);
+          g.font = '700 10.5px ' + FONT; g.fillText(fit('+ ' + c.extra, maxW), x + 8, ry + 26);
+        } else if (c.text) {
+          g.font = (c.bold ? '700 ' : '400 ') + '13px ' + FONT; g.fillText(fit(c.text + (c.unconf ? ' ?' : ''), maxW), x + 8, ry + H_ROW / 2);
+        }
+      }
+    });
+    // Raster
+    g.strokeStyle = '#d5d9de'; g.lineWidth = 1;
+    for (let ri = 0; ri <= rows.length; ri++) { const ly = Math.round(y + ri * H_ROW) + 0.5; g.beginPath(); g.moveTo(PAD, ly); g.lineTo(W - PAD, ly); g.stroke(); }
+    for (let i = 0; i <= nDays; i++) { const lx = Math.round(PAD + W_NAME + i * W_DAY) + 0.5; g.beginPath(); g.moveTo(lx, PAD + H_TITLE); g.lineTo(lx, H - PAD); g.stroke(); }
+    g.strokeStyle = '#9aa0a6'; g.strokeRect(PAD + 0.5, PAD + H_TITLE + 0.5, W - PAD * 2 - 1, H - PAD * 2 - H_TITLE - 1);
+    return cv;
+  }
+  function openWeekShot() {
+    const run = () => {
+      const cv = weekMonteurImage(), name = 'Wochenplan_Monteure_KW' + isoWeek(selMonday) + '_' + new Date(selMonday).getUTCFullYear() + '.png';
+      const ov = el('div', 'overlay'), dlg = el('div', 'dialog shot-dialog');
+      dlg.appendChild(el('h3', null, 'Wochenplan Monteure · KW ' + isoWeek(selMonday)));
+      const img = document.createElement('img'); img.className = 'shot-img'; img.alt = 'Wochenplan der Monteure'; img.src = cv.toDataURL('image/png');
+      const wrap = el('div', 'shot-wrap'); wrap.appendChild(img); dlg.appendChild(wrap);
+      const act = el('div', 'dialog-actions');
+      const copy = el('button', 'btn primary', 'In Zwischenablage kopieren'), dl = el('button', 'btn', 'Als Bild speichern'), close = el('button', 'btn', 'Schließen');
+      const shut = () => ov.remove();
+      copy.onclick = () => cv.toBlob(async (blob) => {
+        try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); toast('Bild kopiert – jetzt z. B. in Teams, WhatsApp oder eine Mail einfügen'); shut(); }
+        catch (e) { toast('Kopieren nicht möglich – bitte „Als Bild speichern" verwenden'); }
+      }, 'image/png');
+      dl.onclick = () => { const a = document.createElement('a'); a.href = img.src; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
+      close.onclick = shut;
+      act.appendChild(copy); act.appendChild(dl); act.appendChild(el('div', 'spacer')); act.appendChild(close);
+      dlg.appendChild(act); ov.appendChild(dlg);
+      ov.addEventListener('click', (e) => { if (e.target === ov) shut(); });
+      document.body.appendChild(ov);
+    };
+    // Schrift sicher geladen haben, sonst zeichnet das Canvas mit der Ersatzschrift
+    if (document.fonts && document.fonts.load) Promise.all([document.fonts.load("400 13px 'Roboto Condensed'"), document.fonts.load("700 13px 'Roboto Condensed'")]).then(run, run); else run();
+  }
+  { const b = document.getElementById('wkShot'); if (b) b.onclick = openWeekShot; }
 
   function moveAssignment(fromKey, toKey) {
     if (fromKey === toKey) return;
