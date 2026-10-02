@@ -1904,6 +1904,9 @@
     save(); renderWeek();
   }
 
+  // Eingeklappte Bereiche der Woche (pro Browser gemerkt)
+  const WK_COLLAPSE_KEY = 'montageplanung_wk_collapsed';
+  const wkCollapsed = new Set((() => { try { return JSON.parse(localStorage.getItem(WK_COLLAPSE_KEY)) || []; } catch (e) { return []; } })());
   function renderWeek() {
     const sl = 0, st = viewport.scrollTop;
     const dates = weekDates();
@@ -1920,9 +1923,28 @@
     }
 
     const grid = el('div', 'weekgrid');
-    grid.appendChild(el('div', 'wk-corner', 'Monteur / Bauleitung'));
+    const today = todayMs();
+    const dayCls = (i) => (i >= 5 ? ' weekend' : '') + (dates[i] === today ? ' today' : '');
+    // Bereichs-Kopf über die ganze Breite; Klick klappt den Bereich ein/aus. Liefert true, wenn der Bereich offen ist.
+    const addSection = (key, text, cls) => {
+      const closed = wkCollapsed.has(key);
+      const sep = el('div', 'wk-sep' + (cls ? ' ' + cls : '') + (closed ? ' closed' : ''));
+      const inner = el('span', 'wk-sep-inner');
+      inner.appendChild(el('span', 'wk-sep-arrow', closed ? '▸' : '▾'));
+      inner.appendChild(document.createTextNode(text));
+      sep.appendChild(inner);
+      sep.title = closed ? 'Bereich aufklappen' : 'Bereich einklappen';
+      sep.addEventListener('click', () => {
+        if (closed) wkCollapsed.delete(key); else wkCollapsed.add(key);
+        try { localStorage.setItem(WK_COLLAPSE_KEY, JSON.stringify([...wkCollapsed])); } catch (e) {}
+        renderWeek();
+      });
+      grid.appendChild(sep);
+      return !closed;
+    };
+    grid.appendChild(el('div', 'wk-corner', 'KW ' + kw));
     dates.forEach((ms, i) => {
-      const h = el('div', 'wk-dayhead' + (i >= 5 ? ' weekend' : ''));
+      const h = el('div', 'wk-dayhead' + dayCls(i));
       h.innerHTML = `${WDAYS[i]} <small>${fmt(ms).slice(0, 6)}</small>`;
       grid.appendChild(h);
     });
@@ -1933,9 +1955,8 @@
     const sites = weekConfirmedSites();
     if (sites.length) {
       const gaps = sites.filter(s => s.anyGap).length;
-      grid.appendChild(el('div', 'wk-sep wk-sep-sites', 'Montagen diese Woche' + (gaps ? ' · ' + gaps + '× ohne Monteur' : '')));
-      for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill wk-sep-sites'));
-      for (const s of sites) {
+      const open = addSection('sites', 'Baustellen · Montagen diese Woche (' + sites.length + ')' + (gaps ? ' · ' + gaps + '× ohne Monteur' : ''), 'wk-sep-sites');
+      for (const s of (open ? sites : [])) {
         const nameCell = el('div', 'wk-name wk-site-name' + (s.anyGap ? ' wk-site-gap' : '') + (s.anyPlanned ? '' : ' wk-site-idle-name') + (s.unconfirmed ? ' wk-site-unconf-name' : ''));
         if (s.anyGap) { const w = el('span', 'wk-warn', '⚠'); nameCell.appendChild(w); }
         nameCell.appendChild(el('span', 'wk-site-text', s.name + (s.sub ? ' · ' + s.sub : '')));
@@ -1948,7 +1969,7 @@
         grid.appendChild(nameCell);
         dates.forEach((ms, i) => {
           const n = s.perDay[i];
-          const cell = el('div', 'wk-cell wk-site-cell' + (i >= 5 ? ' weekend' : ''));
+          const cell = el('div', 'wk-cell wk-site-cell' + dayCls(i));
           if (n === null) { /* außerhalb des Fensters – leer */ }
           else if (n === 'idle') {
             cell.classList.add('wk-site-idle');
@@ -1973,9 +1994,8 @@
     // Sektion „Offener Bedarf" – Gewerke, die im Zeitplan gefordert, aber noch nicht besetzt sind
     const needs = weekOpenDemand();
     if (needs.length) {
-      grid.appendChild(el('div', 'wk-sep wk-sep-need', 'Offener Bedarf – noch niemand zugeordnet'));
-      for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill wk-sep-need'));
-      for (const nd of needs) {
+      const secOpen = addSection('need', 'Offener Bedarf – noch niemand zugeordnet (' + needs.length + ')', 'wk-sep-need');
+      for (const nd of (secOpen ? needs : [])) {
         const t = TRADES()[nd.trade] || { label: '(Gewerk offen)', short: '', color: '#999' };
         const nameCell = el('div', 'wk-name wk-need-name');
         const dot = el('span', 'need-dot'); dot.style.background = t.color; nameCell.appendChild(dot);
@@ -1984,7 +2004,7 @@
         grid.appendChild(nameCell);
         dates.forEach((ms, i) => {
           const dISO = isoStr(ms), open = nd.days[dISO] || 0;
-          const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (open ? ' wk-need' : ''));
+          const cell = el('div', 'wk-cell wk-need-cell' + dayCls(i) + (open ? ' wk-need' : ''));
           if (open) {
             cell.textContent = open + '×' + (t.short ? ' ' + t.short : '');
             cell.style.setProperty('--need-col', t.color);
@@ -1996,13 +2016,17 @@
       }
     }
 
-    let lastKind = null;
-    for (const p of weekPeople()) {
-      if (p.kind === 'bauleiter' && lastKind !== 'bauleiter') {
-        const sep = el('div', 'wk-sep', 'Bauleitung'); grid.appendChild(sep);
-        for (let i = 0; i < 7; i++) grid.appendChild(el('div', 'wk-sep-fill'));
+    const people = weekPeople();
+    const nBl = people.filter(p => p.kind === 'bauleiter').length;
+    let lastSec = null, secOpen = true;
+    for (const p of people) {
+      const sec = p.kind === 'bauleiter' ? 'bl' : 'mont';
+      if (sec !== lastSec) {
+        lastSec = sec;
+        secOpen = sec === 'bl' ? addSection('bl', 'Bauleitung (' + nBl + ')', 'wk-sep-bl')
+          : addSection('mont', 'Monteure (' + (people.length - nBl) + ')', 'wk-sep-mont');
       }
-      lastKind = p.kind;
+      if (!secOpen) continue;
       const nameCell = el('div', 'wk-name' + (p.kind === 'extern' ? ' extern' : ''), p.name);
       nameCell.title = p.name + (p.kind === 'extern' ? ' (extern)' : '') + '\nRechtsklick: Woche kopieren / einfügen';
       nameCell.addEventListener('contextmenu', (e) => { e.preventDefault(); openPersonMenu(e.clientX, e.clientY, p); });
@@ -2037,7 +2061,7 @@
           if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
         }
         if (der.half && proj.length && type !== 'nv' && !(note && !extra)) { text += ' · ½ Tag'; title += (title ? '\n' : '') + 'Halber Montagetag'; }
-        const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : '') + (split ? ' wk-split' : ''));
+        const cell = el('div', 'wk-cell' + dayCls(i) + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : '') + (split ? ' wk-split' : ''));
         cell.dataset.key = key;
         if (text) cell.textContent = text;
         if (extra) {
