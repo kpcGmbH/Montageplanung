@@ -635,7 +635,23 @@ function applyPrefill(pf){
   set('objektname', pf.objektname); set('projektnummer', pf.projektnummer);
   set('ort', pf.ort); set('strasse', pf.strasse); set('plz', pf.plz);
   set('datum', pf.datum); set('zeitraum', pf.zeitraum);
+  // Einladung für ein einzelnes Gewerk: Einsatzart, Tätigkeit, Eintransport und Monteure aus der Phase
+  if (Array.isArray(pf.arten)) {
+    document.querySelectorAll('[data-art]').forEach(el=>{ el.checked = pf.arten.indexOf(el.dataset.art) >= 0; });
+    applyArt(true);
+    (pf.taetigkeiten||[]).forEach(k=>{ const c=document.querySelector(`[data-taet="${k}"]`); if(c) c.checked=true; });
+    (pf.eintransport||[]).forEach(i=>{ const c=document.querySelector(`[data-et="${i}"]`); if(c) c.checked=true; });
+    syncPanels();
+    set('datum', pf.datum); set('zeitraum', pf.zeitraum);
+  }
+  set('mitfahrer', pf.mitfahrer);
   set('bl_name', pf.bl_name); set('bl_tel', pf.bl_tel); set('bl_mail', pf.bl_mail);
+  // Bauleiter aus dem Zeitplan in der Kontaktliste suchen → Telefon/E-Mail ergänzen
+  if (pf.bl_name && !pf.bl_tel) {
+    const q = String(pf.bl_name).toLowerCase().replace(/^bl\s+/, '');
+    const i = CONTACTS.findIndex(c => { const n = c.name.toLowerCase(); return n === q || n.indexOf(q) >= 0 || q.indexOf(n) >= 0; });
+    if (i >= 0) { $('bl_select').value = String(i); $('bl_name').value = CONTACTS[i].name; $('bl_tel').value = CONTACTS[i].tel; $('bl_mail').value = CONTACTS[i].mail; }
+  }
   clearMissing(); render();
 }
 

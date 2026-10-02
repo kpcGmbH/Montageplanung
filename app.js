@@ -1076,12 +1076,21 @@
       wkc.onchange = () => { ph.weekend = wkc.checked; refreshEnd(); };
       cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
       const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
+      // Termineinladung nur für dieses Gewerk (eigener Entwurf): speichert die Maske und öffnet die Einladung der Phase
+      const pti = el('span', 'phase-ti', '✉'); pti.title = 'Termineinladung für dieses Gewerk (Zeitraum, Monteure und Tätigkeit der Phase)\nDie Maske wird dabei gespeichert.';
+      pti.onclick = () => {
+        if (!current) return;
+        const { row, bar } = current;
+        document.getElementById('f-save').click();
+        if (current || !bar.phases || !bar.phases[i] || row.bars.indexOf(bar) < 0) return;   // Speichern abgebrochen
+        openTermineinladung(row, bar, i);
+      };
       const line2 = el('div', 'phase-row2');
       const vonL = el('label', 'phase-fld', 'Start'); vonL.appendChild(von);
       const durL = el('label', 'phase-fld phase-cnt', 'Montagetage'); durL.appendChild(dur);
       const wkL = el('label', 'phase-fld phase-wk', 'Sa/So'); wkL.appendChild(wkc);
       const cntL = el('label', 'phase-fld phase-cnt', 'Pers.'); cntL.appendChild(cnt);
-      line2.appendChild(vonL); line2.appendChild(durL); line2.appendChild(wkL); line2.appendChild(cntL); line2.appendChild(del);
+      line2.appendChild(vonL); line2.appendChild(durL); line2.appendChild(wkL); line2.appendChild(cntL); line2.appendChild(pti); line2.appendChild(del);
       refreshEnd();
       // Monteur-Zuordnung – nur nach Gewerk qualifizierte
       const asgTitle = el('div', 'assign-title', '');
@@ -2572,48 +2581,80 @@
   const tiFrame = document.getElementById('tiFrame');
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
-  let tiProject = null, tiBar = null, tiReady = false;
-  const TI_SRC = 'termineinladung.html?v=46';
-  function tiDraftName(row, bar) {
+  let tiProject = null, tiBar = null, tiPhase = -1, tiReady = false, tiFresh = false;
+  const TI_SRC = 'termineinladung.html?v=47';
+  const tiPh = () => (tiBar && tiPhase >= 0 && tiBar.phases) ? tiBar.phases[tiPhase] || null : null;
+  // Gewerk → Vorbelegung in der Einladung (Tätigkeit bzw. Eintransport-Option)
+  const TI_TRADE = { edelstahl: { taet: ['edelstahl'] }, elektrik: { taet: ['elektro'] }, sanitaer: { taet: ['sanitaer'] }, sanitaer_klein: { taet: ['sanitaer'] }, eintransporthelfer: { et: [3] }, lagerist: {} };
+  // Schlüssel der Phase für den Entwurf: Gewerk (+ laufende Nummer bei mehreren Phasen desselben Gewerks)
+  function tiPhaseKey(bar, idx) {
+    const ph = bar.phases[idx], t = ph.trade || 'gewerk';
+    const nth = bar.phases.slice(0, idx).filter(p => (p.trade || 'gewerk') === t).length;
+    return t + (nth ? (nth + 1) : '');
+  }
+  function tiDraftName(row, bar, phIdx) {
     const name = bar ? (bar.label || row.site || row.label || '') : (row.site || row.label || '');
     const base = ((row.nummer ? row.nummer + ' ' : '') + name)
       .replace(/[^0-9A-Za-zÄÖÜäöüß ._-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
     const barKey = bar ? '__' + String(bar.bid || bar.start || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
-    return (base || 'projekt') + '__' + row.id + barKey + '.json';
+    const phKey = (bar && phIdx >= 0 && bar.phases && bar.phases[phIdx]) ? '__' + tiPhaseKey(bar, phIdx) : '';
+    return (base || 'projekt') + '__' + row.id + barKey + phKey + '.json';
   }
-  function tiPrefill(row, bar) {
+  function tiPrefill(row, bar, phIdx) {
+    const ph = (bar && phIdx >= 0 && bar.phases) ? bar.phases[phIdx] : null;
     let datum = '', zeitraum = '', objektname = row.site || row.label || '';
-    if (bar) {
+    const span = (s, e) => { if (s === e) datum = s; else zeitraum = fmt(parse(s)) + '–' + fmt(parse(e)); };
+    if (ph) {
+      // Einladung für ein Gewerk: Zeitraum der Phase; Bezeichnung nur bei Kleinprojekten aus dem Balken
+      if (isKleinRow(row)) objektname = bar.label || objektname;
+      span(ph.start, ph.end);
+    } else if (bar) {
       // Einzelne Montage (z. B. ein Kleinprojekt): Bezeichnung + Zeitraum aus dem Balken
       objektname = bar.label || objektname;
-      if (bar.start === bar.end) datum = bar.start; else zeitraum = fmt(parse(bar.start)) + '–' + fmt(parse(bar.end));
+      span(bar.start, bar.end);
     } else {
       const bars = (row.bars || []).slice().sort((a, b) => parse(a.start) - parse(b.start));
-      if (bars.length) { const b = bars[0]; if (b.start === b.end) datum = b.start; else zeitraum = fmt(parse(b.start)) + '–' + fmt(parse(b.end)); }
+      if (bars.length) span(bars[0].start, bars[0].end);
     }
     const a = (bar && isKleinRow(row)) ? { strasse: bar.strasse || '', plz: bar.plz || '', ort: bar.ort || '' } : rowAddr(row);
-    return { objektname, projektnummer: row.nummer || '', ort: a.ort || row.ort || '', strasse: a.strasse, plz: a.plz, datum, zeitraum };
+    const pf = { objektname, projektnummer: row.nummer || '', ort: a.ort || row.ort || '', strasse: a.strasse, plz: a.plz, datum, zeitraum };
+    if (ph) {
+      const m = TI_TRADE[ph.trade] || {};
+      pf.arten = ['montage']; pf.taetigkeiten = m.taet || []; pf.eintransport = m.et || [];
+      pf.mitfahrer = [...new Set((ph.assigned || []).map(idOf))].map(monteurName).join(', ');
+      const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
+      if (bl.length) pf.bl_name = bl[0];
+    }
+    return pf;
   }
   async function tiSendInit() {
     if (!tiProject || !tiReady || !tiFrame.contentWindow) return;
     let state = null;
-    if (window.Cloud && Cloud.isReady()) {
+    const fresh = tiFresh; tiFresh = false;   // „Formular leeren": Entwurf nicht wieder laden
+    if (!fresh && window.Cloud && Cloud.isReady()) {
       tiStatus.textContent = 'lade Zwischenstand …';
-      try { state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar)); } catch (e) { /* kein Draft / offline */ }
+      try { state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase)); } catch (e) { /* kein Draft / offline */ }
     }
     tiStatus.textContent = state ? 'Zwischenstand geladen'
       : (window.Cloud && Cloud.isReady()) ? 'neu · aus Projektdaten vorbefüllt'
       : 'nicht angemeldet – kein SharePoint-Speichern';
-    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : ''), prefill: tiPrefill(tiProject, tiBar), state: state || null }, '*');
+    const ph = tiPh();
+    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : '') + (ph ? '~' + tiPhaseKey(tiBar, tiPhase) : ''), prefill: tiPrefill(tiProject, tiBar, tiPhase), state: state || null }, '*');
   }
-  function openTermineinladung(row, bar) {
-    tiProject = row; tiBar = bar || null;
-    tiTitle.textContent = 'Termineinladung · ' + ((bar && bar.label) || row.site || row.label || '');
+  // Formular frisch laden – sonst blieben Eingaben der zuvor geöffneten Einladung stehen
+  function tiReload() {
+    tiReady = false;
+    if (!tiFrame.getAttribute('src')) tiFrame.setAttribute('src', TI_SRC);  // lädt → sendet ti-ready → tiSendInit
+    else { try { tiFrame.contentWindow.location.reload(); } catch (e) { tiFrame.setAttribute('src', TI_SRC); } }
+  }
+  function openTermineinladung(row, bar, phIdx) {
+    tiProject = row; tiBar = bar || null; tiPhase = (bar && phIdx >= 0) ? phIdx : -1;
+    const ph = tiPh(), tl = ph && TRADES()[ph.trade] ? ' · ' + TRADES()[ph.trade].label : '';
+    tiTitle.textContent = 'Termineinladung · ' + ((bar && bar.label) || row.site || row.label || '') + tl;
     tiStatus.textContent = '';
     document.getElementById('tiBack').textContent = viewMode === 'week' ? '← Zurück zur Woche' : '← Zurück zum Zeitplan';
     tiView.hidden = false;
-    if (!tiFrame.getAttribute('src')) tiFrame.setAttribute('src', TI_SRC);  // lädt einmal → sendet ti-ready
-    else tiSendInit();
+    tiReload();
   }
   document.getElementById('tiBack').onclick = () => { tiView.hidden = true; };
   window.addEventListener('message', async (e) => {
@@ -2623,10 +2664,10 @@
     else if (m.type === 'ti-save') {
       if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, '*'); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
       tiStatus.textContent = 'speichere …';
-      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
+      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
       catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, '*'); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
     }
-    else if (m.type === 'ti-reset') { tiFrame.contentWindow.postMessage({ type: 'ti-init', prefill: tiPrefill(tiProject, tiBar), state: null }, '*'); }
+    else if (m.type === 'ti-reset') { tiFresh = true; tiReload(); }
   });
 
   // ---- Cloud-Sync (Microsoft-Login + SharePoint), optional ----
