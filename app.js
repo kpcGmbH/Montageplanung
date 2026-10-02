@@ -181,8 +181,11 @@
   // Nächster Werktag ab dem Datum (inkl. des Datums selbst).
   function snapWorkday(iso) { let ms = parse(iso); while (!isWorkdayMs(ms)) ms = addDays(ms, 1); return isoStr(ms); }
   // Enddatum = Datum des n-ten Montagetags ab Start (Start zählt als Tag 1, falls Arbeitstag).
+  // Halbe Tage sind erlaubt (0,5 / 1,5 …): der letzte Tag ist dann nur ein halber, belegt aber seinen Kalendertag.
+  const halfDays = (v) => Math.max(0.5, Math.round((+v || 1) * 2) / 2);
+  const isHalf = (ph) => !!ph && (+ph.days % 1) !== 0;
   function endFromDays(startISO, nDays, weekend) {
-    nDays = Math.max(1, Math.round(+nDays || 1));
+    nDays = Math.max(1, Math.ceil(+nDays || 1));
     let ms = parse(startISO), count = 0;
     for (;;) {
       if (weekend || isWorkdayMs(ms)) { count++; if (count >= nDays) return isoStr(ms); }
@@ -1059,17 +1062,17 @@
       if (typeof ph.weekend !== 'boolean') ph.weekend = false;
       if (!(+ph.days > 0)) ph.days = daysCount(ph.start, ph.end || ph.start, ph.weekend);
       const von = document.createElement('input'); von.type = 'date'; von.value = ph.start;
-      const dur = document.createElement('input'); dur.type = 'number'; dur.min = '1'; dur.step = '1'; dur.value = ph.days; dur.title = 'Anzahl Montagetage';
+      const dur = document.createElement('input'); dur.type = 'number'; dur.min = '0.5'; dur.step = '0.5'; dur.value = ph.days; dur.title = 'Anzahl Montagetage (halbe Tage möglich, z. B. 0,5 oder 1,5)';
       const wkc = document.createElement('input'); wkc.type = 'checkbox'; wkc.checked = !!ph.weekend; wkc.title = 'Auch am Wochenende (Sa/So) arbeiten';
       const cnt = document.createElement('input'); cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.value = ph.count || 1; cnt.title = 'Anzahl Personen';
       const endHint = el('div', 'phase-endhint', '');
       const refreshEnd = () => {
         if (!ph.weekend) { ph.start = snapWorkday(ph.start); von.value = ph.start; }
         ph.end = endFromDays(ph.start, ph.days, ph.weekend);
-        endHint.textContent = '→ endet ' + wdShort(ph.end) + ' ' + fmt(parse(ph.end)) + (ph.weekend ? ' · inkl. Wochenende' : '');
+        endHint.textContent = '→ endet ' + wdShort(ph.end) + ' ' + fmt(parse(ph.end)) + (isHalf(ph) ? (+ph.days < 1 ? ' · halber Tag' : ' · letzter Tag halb') : '') + (ph.weekend ? ' · inkl. Wochenende' : '');
       };
       von.onchange = () => { ph.start = von.value || ph.start; refreshEnd(); };
-      dur.oninput = () => { ph.days = Math.max(1, Math.round(+dur.value || 1)); refreshEnd(); };
+      dur.oninput = () => { ph.days = halfDays(String(dur.value).replace(',', '.')); refreshEnd(); };
       wkc.onchange = () => { ph.weekend = wkc.checked; refreshEnd(); };
       cnt.oninput = () => { ph.count = Math.max(1, +cnt.value || 1); };
       const del = el('span', 'phase-del', '✕'); del.title = 'Phase entfernen'; del.onclick = () => { phaseDraft.splice(i, 1); renderPhaseList(); };
@@ -1203,7 +1206,7 @@
       bar.phases = (phaseDraft.length && !blOnly)
         ? phaseDraft.map(p => {
             const weekend = !!p.weekend;
-            const daysN = Math.max(1, Math.round(+p.days || 1));
+            const daysN = halfDays(p.days);
             const s = weekend ? p.start : snapWorkday(p.start);   // Werktags-Einsatz beginnt an einem Werktag
             const e = endFromDays(s, daysN, weekend);             // Ende = Start + Montagetage (Wochenende ggf. übersprungen)
             const asg = (p.assigned || []).map(a => {
@@ -1722,7 +1725,7 @@
           : (bar.crew ? [{ start: bar.crew.start || bar.start, end: bar.crew.end || bar.end, assigned: bar.crew.assigned }] : []);
         const unconf = effCat(row, bar) === 'preplanning';   // „Vorplanung / nicht bestätigt"
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
@@ -2033,6 +2036,7 @@
           type = (p.kind === 'bauleiter') ? 'bauleitung' : 'baustelle'; text = disp[0]; title = (p.kind === 'bauleiter' ? 'Bauleitung: ' : '') + disp[0];
           if (der.unconfirmed) { unconfirmed = true; title += ' — noch nicht bestätigt (Vorplanung)'; }
         }
+        if (der.half && proj.length && type !== 'nv' && !(note && !extra)) { text += ' · ½ Tag'; title += (title ? '\n' : '') + 'Halber Montagetag'; }
         const cell = el('div', 'wk-cell' + (i >= 5 ? ' weekend' : '') + (type ? ' t-' + type : '') + (conflict ? ' wk-conflict' : '') + (unconfirmed ? ' wk-unconfirmed' : '') + (override ? ' wk-override' : '') + (split ? ' wk-split' : ''));
         cell.dataset.key = key;
         if (text) cell.textContent = text;
@@ -2292,7 +2296,8 @@
       if (parse(bar.end) > parse(ph.end)) ph.end = bar.end;
       if (weekendDay) ph.weekend = true;
     }
-    ph.days = daysCount(ph.start, ph.end, !!ph.weekend);
+    const span = daysCount(ph.start, ph.end, !!ph.weekend);
+    if (!(isHalf(ph) && Math.ceil(+ph.days) === span)) ph.days = span;   // halben Tag behalten, solange die Spanne passt
     addToPhase(ph, pid, dISO);
     save();
   }
