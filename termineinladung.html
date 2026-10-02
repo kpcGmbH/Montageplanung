@@ -308,11 +308,13 @@ const TAETIGKEITEN = [
   { key:"restarbeiten", label:"Restarbeiten", tools:[], items:[], freitext:true }
 ];
 
+const FORTSCHRITT_URL = "https://kpcgmbh.github.io/Montagefortschritt/";
+const FORTSCHRITT_ARTEN = ["inbetriebnahme","montage","demontage","anschluss_sanitaer","anschluss_elektro","restarbeiten"];
 const SECTION_DISPLAY = {
   "OBJEKT / PROJEKT":"Objekt / Projekt", "TERMIN":"Termin", "ZUGANG & ANMELDUNG VOR ORT":"Zugang & Anmeldung vor Ort",
   "ARBEITSAUFTRAG":"Arbeitsauftrag", "AUS LAGER MITNEHMEN":"Aus Lager mitnehmen", "GEPLANTE ANLIEFERUNGEN":"Geplante Anlieferungen",
   "EINTRANSPORT":"Eintransport", "GEPLANTE TÄTIGKEITEN / LEISTUNGSUMFANG":"Geplante Tätigkeiten / Leistungsumfang",
-  "GERÄTE / POSITIONEN":"Geräte / Positionen", "VOR ORT AUSZUFÜLLEN / ZURÜCKZUFÜHREN":"Vor Ort auszufüllen / zurückzuführen",
+  "GERÄTE / POSITIONEN":"Geräte / Positionen", "VOR ORT AUSZUFÜLLEN / ZURÜCKZUFÜHREN":"Vor Ort auszufüllen / zurückzuführen", "MONTAGEFORTSCHRITT":"Montagefortschritt",
   "MITZUFÜHRENDE MATERIALIEN":"Mitzuführende Materialien", "ANSPRECHPARTNER":"Ansprechpartner",
   "SCHNITTSTELLEN & ABHÄNGIGKEITEN":"Schnittstellen & Abhängigkeiten", "PLÄNE & UNTERLAGEN":"Pläne & Unterlagen",
   "SONSTIGE HINWEISE":"Sonstige Hinweise", "RÜCKMELDUNG UNMITTELBAR NACH TERMIN":"Rückmeldung unmittelbar nach Termin",
@@ -596,6 +598,13 @@ function buildText(){
 
   const dok = toLines($("dokumente").value);
   if (dok.length){ sec("Vor Ort auszufüllen / zurückzuführen"); dok.forEach((d,i)=>L.push(`${i+1}. ${d}`)); }
+
+  // Verweis auf die Montagefortschritt-App (nicht bei Wartung / Reparatur)
+  if (arten.some(a=>FORTSCHRITT_ARTEN.indexOf(a) >= 0)){
+    sec("Montagefortschritt");
+    L.push("Den Fortschritt der Arbeiten bitte in der Montagefortschritt-App erfassen:");
+    L.push(FORTSCHRITT_URL);
+  }
 
   let mat = toLines($("material").value);
   if (anyMontage) mat = uniq([...mat, ...montageAutoTools()]);
