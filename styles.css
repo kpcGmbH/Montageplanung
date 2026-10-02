@@ -453,10 +453,11 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .wk-sep-arrow { font-size: 10px; width: 10px; }
 .wk-sep.wk-sep-mont { background: #e3edf8; color: #1f4f86; border-top-color: #9db9d8; }
 .wk-sep.wk-sep-bl { background: #ece6f6; color: #55358f; border-top-color: #b8a6dc; }
-/* Heute-Spalte */
-.wk-dayhead.today { background: var(--copper); color: #fff; }
-.wk-dayhead.today small { color: #fff; opacity: .85; }
-.wk-cell.today { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--copper) 45%, transparent), inset -2px 0 0 color-mix(in srgb, var(--copper) 45%, transparent); }
+/* Heute-Spalte: dezenter Kopf mit Kupfer-Unterstrich + „Heute", leere Zellen leicht warm getönt */
+.wk-dayhead.today { background: #fbefe0; color: var(--copper-dark); box-shadow: inset 0 -3px 0 var(--copper); }
+.wk-dayhead.today small { color: var(--copper-dark); opacity: .8; }
+.wk-dayhead.today::after { content: 'Heute'; margin-left: 8px; font-size: 9.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: #fff; background: var(--copper); padding: 1px 6px; border-radius: 8px; vertical-align: 1px; }
+.wk-cell.today:not([class*=" t-"]):not(.wk-site-ok):not(.wk-site-nostaff):not(.wk-site-idle):not(.wk-need):not(.wk-conflict):not(.wk-unconfirmed) { background: #fdf8f1; }
 /* Sektion „Bestätigte Montagen diese Woche" */
 .wk-sep.wk-sep-sites { background: #e2f0d6; color: #33600f; border-top-color: #a9cf8c; margin-top: 0; }
 /* Baustellen-/Bedarfszeilen kompakter als Personenzeilen */
