@@ -2582,10 +2582,10 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = -1, tiReady = false, tiFresh = false;
-  const TI_SRC = 'termineinladung.html?v=47';
+  const TI_SRC = 'termineinladung.html?v=48';
   const tiPh = () => (tiBar && tiPhase >= 0 && tiBar.phases) ? tiBar.phases[tiPhase] || null : null;
   // Gewerk → Vorbelegung in der Einladung (Tätigkeit bzw. Eintransport-Option)
-  const TI_TRADE = { edelstahl: { taet: ['edelstahl'] }, elektrik: { taet: ['elektro'] }, sanitaer: { taet: ['sanitaer'] }, sanitaer_klein: { taet: ['sanitaer'] }, eintransporthelfer: { et: [3] }, lagerist: {} };
+  const TI_TRADE = { edelstahl: { taet: ['edelstahl'] }, elektrik: { art: 'anschluss_elektro', taet: ['elektro'] }, sanitaer: { art: 'anschluss_sanitaer', taet: ['sanitaer'] }, sanitaer_klein: { art: 'anschluss_sanitaer', taet: ['sanitaer'] }, eintransporthelfer: { et: [3] }, lagerist: {} };
   // Schlüssel der Phase für den Entwurf: Gewerk (+ laufende Nummer bei mehreren Phasen desselben Gewerks)
   function tiPhaseKey(bar, idx) {
     const ph = bar.phases[idx], t = ph.trade || 'gewerk';
@@ -2620,7 +2620,7 @@
     const pf = { objektname, projektnummer: row.nummer || '', ort: a.ort || row.ort || '', strasse: a.strasse, plz: a.plz, datum, zeitraum };
     if (ph) {
       const m = TI_TRADE[ph.trade] || {};
-      pf.arten = ['montage']; pf.taetigkeiten = m.taet || []; pf.eintransport = m.et || [];
+      pf.arten = [m.art || 'montage']; pf.taetigkeiten = m.taet || []; pf.eintransport = m.et || [];
       pf.mitfahrer = [...new Set((ph.assigned || []).map(idOf))].map(monteurName).join(', ');
       const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
       if (bl.length) pf.bl_name = bl[0];

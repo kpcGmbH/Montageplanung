@@ -235,12 +235,28 @@ const EINSATZ = {
     anlagen:["Vorlage Servicebericht","Störungsmeldung"]
   },
   montage: {
-    label:"Montage / Aufbau / Anschlussarbeiten", kurz:"Montage / Anschlussarbeiten", betreff:"Montage Küchentechnik", einweisung:false, stoerung:false, montage:true,
+    label:"Montage / Aufbau", kurz:"Montage", betreff:"Montage Küchentechnik", einweisung:false, stoerung:false, montage:true,
     auftrag:"Anlieferung und Montage der Küchentechnik gemäß Aufstell- und Installationsplan.",
     zusatz:[],
     dokumente:["Montageprotokoll","Servicebericht","Schlüsselübergabeprotokoll"],
     material:["Standardwerkzeug","PSA"],
     anlagen:["Vorlage Servicebericht","Schlüsselübergabedokument","Aufstell- und Installationsplan"]
+  },
+  anschluss_sanitaer: {
+    label:"Anschlussarbeiten Sanitär", kurz:"Anschlussarbeiten Sanitär", betreff:"Anschlussarbeiten Sanitär Küchentechnik", einweisung:false, stoerung:false, montage:true, taet:"sanitaer",
+    auftrag:"Ausführung der Sanitär-Anschlussarbeiten (Wasser / Abwasser) an der Küchentechnik gemäß Installationsplan.",
+    zusatz:[],
+    dokumente:["Servicebericht"],
+    material:["Standardwerkzeug","PSA"],
+    anlagen:["Vorlage Servicebericht","Aufstell- und Installationsplan"]
+  },
+  anschluss_elektro: {
+    label:"Anschlussarbeiten Elektro", kurz:"Anschlussarbeiten Elektro", betreff:"Anschlussarbeiten Elektro Küchentechnik", einweisung:false, stoerung:false, montage:true, taet:"elektro",
+    auftrag:"Ausführung der Elektro-Anschlussarbeiten an der Küchentechnik gemäß Installationsplan.",
+    zusatz:[],
+    dokumente:["Servicebericht"],
+    material:["Standardwerkzeug","Messgeräte","PSA"],
+    anlagen:["Vorlage Servicebericht","Aufstell- und Installationsplan"]
   },
   restarbeiten: {
     label:"Restarbeiten", kurz:"Restarbeiten", betreff:"Restarbeiten Küchentechnik", einweisung:false, stoerung:false, montage:false,
@@ -317,7 +333,12 @@ function uniq(arr){ const s=new Set(); const o=[]; arr.forEach(x=>{ const k=x.to
 for (const k in EINSATZ) {
   const lab = document.createElement("label");
   lab.innerHTML = `<input type="checkbox" data-art="${k}"> <span>${esc(EINSATZ[k].label)}</span>`;
-  lab.querySelector("input").addEventListener("change", ()=>applyArt(false));
+  lab.querySelector("input").addEventListener("change", (e)=>{
+    // Anschlussarbeiten gewählt → passende Tätigkeit im Leistungsumfang gleich mit anhaken
+    const tk = EINSATZ[k].taet, c = tk && document.querySelector(`[data-taet="${tk}"]`);
+    if (c && e.target.checked && !c.checked){ c.checked = true; syncPanels(); }
+    applyArt(false);
+  });
   $("einsatzart").appendChild(lab);
 }
 function selectedArten(){ return Object.keys(EINSATZ).filter(k=>{ const c=document.querySelector(`[data-art="${k}"]`); return c && c.checked; }); }
