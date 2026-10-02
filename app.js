@@ -1722,10 +1722,11 @@
     return occ;
   }
   const vehLabel = (v) => v.name + (v.note ? ' (' + v.note + ')' : '');
+  // Auswahl aus der Maske speichern: entspricht sie der Vorauswahl (Stammfahrzeug bzw. keines), bleibt kein Eintrag.
   function setCar(pid, iso, val) {
     PLAN.cars = PLAN.cars || {};
-    const k = akey(pid, iso);
-    if (!val) delete PLAN.cars[k]; else PLAN.cars[k] = val;   // '' = Standard (kein Eintrag)
+    const k = akey(pid, iso), def = defaultVehOf(pid);
+    if (!val || val === (def ? def.id : 'none')) delete PLAN.cars[k]; else PLAN.cars[k] = val;
   }
   // Manuelle Abwesenheit (frei / n.v.) im Wochenkalender? Dann ist die Person an dem Tag NICHT auf dem
   // geplanten Zeitplan-Einsatz → gibt den Phasen-Platz frei (offener Bedarf).
@@ -2552,13 +2553,13 @@
     const def = defaultVehOf(person.id);
     wCar.innerHTML = '';
     const addOpt = (v, t) => { const o = el('option', null, t); o.value = v; wCar.appendChild(o); };
-    addOpt('', def ? 'Standard: ' + vehLabel(def) : 'Standard: kein Fahrzeug');
-    if (def) addOpt('none', 'kein Fahrzeug');
+    addOpt('none', 'kein Fahrzeug');
     for (const v of vehicles()) {
       const others = (occ[v.id] || []).filter(n => n !== person.name);
-      addOpt(v.id, vehLabel(v) + ' · ' + v.seats + ' Sitze' + (others.length ? ' · mit ' + others.join(', ') : ' · frei') + (v.driver && v !== def ? ' · sonst ' + v.driver : ''));
+      addOpt(v.id, vehLabel(v) + ' · ' + v.seats + ' Sitze' + (others.length ? ' · mit ' + others.join(', ') : ' · frei'));
     }
-    wCar.value = (PLAN.cars || {})[key] || '';
+    // Vorauswahl: die gespeicherte Wahl, sonst das Stammfahrzeug. Gespeichert wird nur, was davon abweicht.
+    wCar.value = (PLAN.cars || {})[key] || (def ? def.id : 'none');
     document.getElementById('w-car-wrap').style.display = vehicles().length ? '' : 'none';
     const blank = !note && !der.projects.length && !der.urlaub;
     wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
@@ -2598,8 +2599,10 @@
     if (!text) { if (assignments[curCell] && assignments[curCell].type !== 'baustelle') parts.push('Notiz entfernt'); delete assignments[curCell]; }
     else { assignments[curCell] = { text, type: wType.value, auto: false }; parts.push('Termin: „' + text + '"'); }
     // 3) Fahrzeug des Tages
-    const carVal = document.getElementById('w-car').value, carOld = (PLAN.cars || {})[curCell] || '';
-    if (carVal !== carOld) { setCar(curCellCtx.pid, curCellCtx.dISO, carVal); parts.push('Fahrzeug: ' + (carVal === 'none' ? 'keines' : carVal ? (vehById(carVal) || {}).name : 'Standard')); }
+    const carOld = (PLAN.cars || {})[curCell] || '';
+    setCar(curCellCtx.pid, curCellCtx.dISO, document.getElementById('w-car').value);
+    const carNew = (PLAN.cars || {})[curCell] || '';
+    if (carNew !== carOld) parts.push('Fahrzeug: ' + (carNew === 'none' ? 'keines' : carNew ? (vehById(carNew) || {}).name : 'Stammfahrzeug'));
     logChange(`${who} am ${day} – ${parts.length ? parts.join(' · ') : 'keine Änderung'}`, 'woche');
     save(); renderWeek(); closeCellEditor();
   };
