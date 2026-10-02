@@ -1735,13 +1735,17 @@
         const unconf = effCat(row, bar) === 'preplanning';   // „Vorplanung / nicht bestätigt"
         // Ziel für das ✉ in der Zelle: Einladung des Gewerks (Phase), bei Bauleitung die der Montage / des Projekts
         const realPh = !!(bar.phases && bar.phases.length);
-        const addTi = (c, phIdx) => { if (!c.ti.some(t => t.bar === bar && t.phIdx === phIdx)) c.ti.push({ row, bar, phIdx, shown }); };
+        // Mehrere Gewerke derselben Person im selben Fenster → EINE Einladung mit allen diesen Gewerken
+        // (alle Phasen des Fensters, in denen die Person steht – so bleibt es an jedem Tag derselbe Entwurf)
+        const phOf = {};
+        if (realPh) phases.forEach((ph, i) => assignedRanges(ph).forEach(r => { const a = (phOf[r.id] = phOf[r.id] || []); if (a.indexOf(i) < 0) a.push(i); }));
+        const addTi = (c, pid) => { if (!c.ti.some(x => x.bar === bar)) c.ti.push({ row, bar, phIdxs: pid ? (phOf[pid] || []) : [], shown }); };
         for (const ph of phases) for (const r of assignedRanges(ph)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, realPh ? phases.indexOf(ph) : -1); if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, r.id); if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, -1); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, null); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
       }
     }
@@ -2089,8 +2093,8 @@
         if (title) cell.title = title;
         // ✉ Termineinladung direkt aus der Zelle: für das Gewerk, in dem die Person an dem Tag eingeplant ist
         if (proj.length && der.ti && der.ti.length) {
-          const openTi = (t) => openTermineinladung(t.row, (t.phIdx >= 0 || isKleinRow(t.row)) ? t.bar : null, t.phIdx);
-          const tiLabel = (t) => t.shown + ((t.phIdx >= 0 && TRADES()[t.bar.phases[t.phIdx].trade]) ? ' · ' + TRADES()[t.bar.phases[t.phIdx].trade].label : '');
+          const openTi = (t) => openTermineinladung(t.row, (t.phIdxs.length || isKleinRow(t.row)) ? t.bar : null, t.phIdxs);
+          const tiLabel = (t) => t.shown + (t.phIdxs.length ? ' · ' + tiTradeLabels(t.bar, t.phIdxs) : '');
           const ti = el('span', 'wk-cell-ti', '✉');
           ti.title = 'Termineinladung' + (der.ti.length === 1 ? ' · ' + tiLabel(der.ti[0]) : ' (Auswahl)');
           ti.addEventListener('click', (e) => {
@@ -2605,9 +2609,11 @@
   const tiFrame = document.getElementById('tiFrame');
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
-  let tiProject = null, tiBar = null, tiPhase = -1, tiReady = false, tiFresh = false;
+  let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
   const TI_SRC = 'termineinladung.html?v=48';
-  const tiPh = () => (tiBar && tiPhase >= 0 && tiBar.phases) ? tiBar.phases[tiPhase] || null : null;
+  // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
+  const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
+  const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
   // Gewerk → Vorbelegung in der Einladung (Tätigkeit bzw. Eintransport-Option)
   const TI_TRADE = { edelstahl: { taet: ['edelstahl'] }, elektrik: { art: 'anschluss_elektro', taet: ['elektro'] }, sanitaer: { art: 'anschluss_sanitaer', taet: ['sanitaer'] }, sanitaer_klein: { art: 'anschluss_sanitaer', taet: ['sanitaer'] }, eintransporthelfer: { et: [3] }, lagerist: {} };
   // Schlüssel der Phase für den Entwurf: Gewerk (+ laufende Nummer bei mehreren Phasen desselben Gewerks)
@@ -2621,17 +2627,17 @@
     const base = ((row.nummer ? row.nummer + ' ' : '') + name)
       .replace(/[^0-9A-Za-zÄÖÜäöüß ._-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
     const barKey = bar ? '__' + String(bar.bid || bar.start || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
-    const phKey = (bar && phIdx >= 0 && bar.phases && bar.phases[phIdx]) ? '__' + tiPhaseKey(bar, phIdx) : '';
+    const idxs = tiIdxs(bar, phIdx), phKey = idxs.length ? '__' + idxs.map(i => tiPhaseKey(bar, i)).join('-') : '';
     return (base || 'projekt') + '__' + row.id + barKey + phKey + '.json';
   }
   function tiPrefill(row, bar, phIdx) {
-    const ph = (bar && phIdx >= 0 && bar.phases) ? bar.phases[phIdx] : null;
+    const phs = tiIdxs(bar, phIdx).map(i => bar.phases[i]);
     let datum = '', zeitraum = '', objektname = row.site || row.label || '';
     const span = (s, e) => { if (s === e) datum = s; else zeitraum = fmt(parse(s)) + '–' + fmt(parse(e)); };
-    if (ph) {
-      // Einladung für ein Gewerk: Zeitraum der Phase; Bezeichnung nur bei Kleinprojekten aus dem Balken
+    if (phs.length) {
+      // Einladung für ein Gewerk (oder mehrere derselben Person): Zeitraum der Phase(n); Bezeichnung nur bei Kleinprojekten aus dem Balken
       if (isKleinRow(row)) objektname = bar.label || objektname;
-      span(ph.start, ph.end);
+      span(phs.map(p => p.start).sort()[0], phs.map(p => p.end).sort().pop());
     } else if (bar) {
       // Einzelne Montage (z. B. ein Kleinprojekt): Bezeichnung + Zeitraum aus dem Balken
       objektname = bar.label || objektname;
@@ -2642,10 +2648,11 @@
     }
     const a = (bar && isKleinRow(row)) ? { strasse: bar.strasse || '', plz: bar.plz || '', ort: bar.ort || '' } : rowAddr(row);
     const pf = { objektname, projektnummer: row.nummer || '', ort: a.ort || row.ort || '', strasse: a.strasse, plz: a.plz, datum, zeitraum };
-    if (ph) {
-      const m = TI_TRADE[ph.trade] || {};
-      pf.arten = [m.art || 'montage']; pf.taetigkeiten = m.taet || []; pf.eintransport = m.et || [];
-      pf.mitfahrer = [...new Set((ph.assigned || []).map(idOf))].map(monteurName).join(', ');
+    if (phs.length) {
+      const maps = phs.map(p => TI_TRADE[p.trade] || {}), uniq = (arr) => [...new Set(arr)];
+      pf.arten = uniq(maps.map(m => m.art || 'montage'));
+      pf.taetigkeiten = uniq(maps.flatMap(m => m.taet || [])); pf.eintransport = uniq(maps.flatMap(m => m.et || []));
+      pf.mitfahrer = uniq(phs.flatMap(p => (p.assigned || []).map(idOf))).map(monteurName).join(', ');
       const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
       if (bl.length) pf.bl_name = bl[0];
     }
@@ -2662,8 +2669,7 @@
     tiStatus.textContent = state ? 'Zwischenstand geladen'
       : (window.Cloud && Cloud.isReady()) ? 'neu · aus Projektdaten vorbefüllt'
       : 'nicht angemeldet – kein SharePoint-Speichern';
-    const ph = tiPh();
-    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : '') + (ph ? '~' + tiPhaseKey(tiBar, tiPhase) : ''), prefill: tiPrefill(tiProject, tiBar, tiPhase), state: state || null }, '*');
+    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : '') + tiIdxs(tiBar, tiPhase).map(i => '~' + tiPhaseKey(tiBar, i)).join(''), prefill: tiPrefill(tiProject, tiBar, tiPhase), state: state || null }, '*');
   }
   // Formular frisch laden – sonst blieben Eingaben der zuvor geöffneten Einladung stehen
   function tiReload() {
@@ -2672,8 +2678,8 @@
     else { try { tiFrame.contentWindow.location.reload(); } catch (e) { tiFrame.setAttribute('src', TI_SRC); } }
   }
   function openTermineinladung(row, bar, phIdx) {
-    tiProject = row; tiBar = bar || null; tiPhase = (bar && phIdx >= 0) ? phIdx : -1;
-    const ph = tiPh(), tl = ph && TRADES()[ph.trade] ? ' · ' + TRADES()[ph.trade].label : '';
+    tiProject = row; tiBar = bar || null; tiPhase = tiIdxs(tiBar, phIdx);
+    const tl = tiPhase.length ? ' · ' + tiTradeLabels(tiBar, tiPhase) : '';
     tiTitle.textContent = 'Termineinladung · ' + ((bar && bar.label) || row.site || row.label || '') + tl;
     tiStatus.textContent = '';
     document.getElementById('tiBack').textContent = viewMode === 'week' ? '← Zurück zur Woche' : '← Zurück zum Zeitplan';
