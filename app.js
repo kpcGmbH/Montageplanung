@@ -44,12 +44,15 @@
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
     const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, ti: r.ti, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
-    return { groups, team: PLAN.team, assignments, changelog: (PLAN.changelog || []) };
+    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
     if (data && Array.isArray(data.groups) && data.groups.length) PLAN.groups = data.groups;
     if (data && Array.isArray(data.team) && data.team.length) PLAN.team = data.team;
     if (data && data.assignments) assignments = data.assignments;
+    // Fuhrpark (Katalog) + Fahrzeug je Person/Tag; fehlt der Katalog im Stand, bleibt der aus data.js
+    if (data && Array.isArray(data.vehicles) && data.vehicles.length) PLAN.vehicles = data.vehicles;
+    if (data && data.cars && typeof data.cars === 'object') PLAN.cars = data.cars; else PLAN.cars = PLAN.cars || {};
     // Changelog (Änderungsverlauf) – geteilt über den 3-Wege-Merge (Array-Vereinigung über id)
     if (data && Array.isArray(data.changelog)) PLAN.changelog = data.changelog;
     else PLAN.changelog = PLAN.changelog || [];
@@ -1688,6 +1691,42 @@
   // Kundendienst, Montage, eigener Text) bedeuten NICHT, dass die Person weg ist – sie koexistieren
   // mit dem Einsatz (z. B. nur anteilig am Tag) und werden zusätzlich angezeigt.
   const ABSENCE_TYPES = new Set(['urlaub', 'nv']);
+
+  // ---- Fuhrpark: Fahrzeug je Person und Tag ----
+  // PLAN.vehicles = Katalog (Name, Sitze, Stammfahrer per Name). PLAN.cars['pid|Datum'] = Fahrzeug-ID oder 'none'.
+  // Ohne Eintrag fährt der Stammfahrer an Einsatztagen sein Stammfahrzeug.
+  const vehicles = () => PLAN.vehicles || [];
+  const vehById = (id) => vehicles().find(v => v.id === id) || null;
+  function defaultVehOf(pid) {
+    const n = (monteurName(pid) || '').trim().toLowerCase(); if (!n) return null;
+    return vehicles().find(v => { const d = (v.driver || '').trim().toLowerCase(); return d && (d === n || d.startsWith(n + ' ') || n.startsWith(d + ' ')); }) || null;
+  }
+  // Einsatztag = Baustelle oder ein Termin, zu dem man fährt (nicht frei / n.v. / Büro)
+  function carActive(pid, iso, derived) {
+    const k = akey(pid, iso), d = derived[k], a = assignments[k];
+    const note = (a && a.type !== 'baustelle') ? a : null;
+    if (note && ABSENCE_TYPES.has(note.type)) return false;
+    if (d && d.urlaub && !(d.projects || []).length) return false;
+    return !!((d && d.projects.length) || (note && note.type !== 'buero'));
+  }
+  function effVeh(pid, iso, derived) {
+    const x = (PLAN.cars || {})[akey(pid, iso)];
+    if (x === 'none') return null;
+    if (x) return vehById(x);
+    return carActive(pid, iso, derived) ? defaultVehOf(pid) : null;
+  }
+  // Belegung eines Tages: Fahrzeug-ID → Namen der Insassen
+  function carOcc(iso, derived) {
+    const occ = {};
+    for (const p of weekPeople()) { const v = effVeh(p.id, iso, derived); if (v) (occ[v.id] = occ[v.id] || []).push(p.name); }
+    return occ;
+  }
+  const vehLabel = (v) => v.name + (v.note ? ' (' + v.note + ')' : '');
+  function setCar(pid, iso, val) {
+    PLAN.cars = PLAN.cars || {};
+    const k = akey(pid, iso);
+    if (!val) delete PLAN.cars[k]; else PLAN.cars[k] = val;   // '' = Standard (kein Eintrag)
+  }
   // Manuelle Abwesenheit (frei / n.v.) im Wochenkalender? Dann ist die Person an dem Tag NICHT auf dem
   // geplanten Zeitplan-Einsatz → gibt den Phasen-Platz frei (offener Bedarf).
   const weekOverride = (pid, dISO) => { const a = assignments[akey(pid, dISO)]; return !!(a && ABSENCE_TYPES.has(a.type)); };
@@ -2085,6 +2124,7 @@
       }
     }
 
+    const occByDay = dates.map(ms => carOcc(isoStr(ms), derived));
     const people = weekPeople();
     const nBl = people.filter(p => p.kind === 'bauleiter').length;
     let lastSec = null, secOpen = true;
@@ -2143,7 +2183,18 @@
           cell.appendChild(chip);
         }
         if (proj.length && der.addrs && der.addrs.length) title += (title ? '\n' : '') + der.addrs.join('\n');
+        // Fahrzeug des Tages (Stammfahrzeug oder gewählt); rot, wenn mehr Personen als Sitze
+        const veh = effVeh(p.id, dISO, derived);
+        if (veh) {
+          const occ = occByDay[i][veh.id] || [], over = occ.length > (+veh.seats || 0);
+          title += (title ? '\n' : '') + '🚐 ' + vehLabel(veh) + ' · ' + occ.length + '/' + veh.seats + ' Sitze: ' + occ.join(', ') + (over ? '\n⚠ Mehr Personen als Sitze!' : '');
+        }
         if (title) cell.title = title;
+        if (veh) {
+          const occ = occByDay[i][veh.id] || [];
+          cell.classList.add('wk-has-car');
+          cell.appendChild(el('span', 'wk-car' + (occ.length > (+veh.seats || 0) ? ' over' : ''), veh.name));
+        }
         // ✉ Termineinladung direkt aus der Zelle: für das Gewerk, in dem die Person an dem Tag eingeplant ist
         if (proj.length && der.ti && der.ti.length) {
           const openTi = (t) => openTermineinladung(t.row, (t.phIdxs.length || isKleinRow(t.row)) ? t.bar : null, t.phIdxs);
@@ -2209,6 +2260,22 @@
         cell.addEventListener('click', () => openCellEditor(key, p, ms));
         grid.appendChild(cell);
       });
+    }
+    // Bereich „Fahrzeuge": wer fährt an welchem Tag womit – freie Fahrzeuge und Überbelegung auf einen Blick
+    if (vehicles().length && addSection('cars', 'Fahrzeuge (' + vehicles().length + ')', 'wk-sep-cars')) {
+      for (const v of vehicles()) {
+        const nameCell = el('div', 'wk-name wk-car-name');
+        nameCell.appendChild(el('span', 'wk-person-name', vehLabel(v)));
+        nameCell.appendChild(el('span', 'wk-car-seats', v.seats + ' Sitze'));
+        nameCell.title = vehLabel(v) + ' · ' + v.seats + ' Sitze' + (v.driver ? '\nIn der Regel: ' + v.driver : '\nFrei verfügbar');
+        grid.appendChild(nameCell);
+        dates.forEach((ms, i) => {
+          const occ = occByDay[i][v.id] || [], over = occ.length > (+v.seats || 0);
+          const cell = el('div', 'wk-cell wk-car-cell' + dayCls(i) + (occ.length ? ' used' : '') + (over ? ' over' : ''));
+          if (occ.length) { cell.textContent = occ.join(', ') + ' (' + occ.length + '/' + v.seats + ')'; cell.title = occ.join(', ') + (over ? '\n⚠ Mehr Personen als Sitze!' : ''); }
+          grid.appendChild(cell);
+        });
+      }
     }
     viewport.innerHTML = '';
     viewport.appendChild(grid);
@@ -2480,6 +2547,19 @@
     renderProjRows();
     wType.value = note ? note.type : (curCellIsBl ? 'bauleitung' : CELL_TYPE_DEFAULT);   // Bauleiter: Standardtyp Bauleitung (nicht Montage)
     // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
+    // Fahrzeug-Auswahl: Standard (Stammfahrzeug an Einsatztagen), keines, oder ein bestimmtes – mit Belegung des Tages
+    const wCar = document.getElementById('w-car'), iso = isoStr(ms), allDer = weekDerived(), occ = carOcc(iso, allDer);
+    const def = defaultVehOf(person.id);
+    wCar.innerHTML = '';
+    const addOpt = (v, t) => { const o = el('option', null, t); o.value = v; wCar.appendChild(o); };
+    addOpt('', def ? 'Standard: ' + vehLabel(def) : 'Standard: kein Fahrzeug');
+    if (def) addOpt('none', 'kein Fahrzeug');
+    for (const v of vehicles()) {
+      const others = (occ[v.id] || []).filter(n => n !== person.name);
+      addOpt(v.id, vehLabel(v) + ' · ' + v.seats + ' Sitze' + (others.length ? ' · mit ' + others.join(', ') : ' · frei') + (v.driver && v !== def ? ' · sonst ' + v.driver : ''));
+    }
+    wCar.value = (PLAN.cars || {})[key] || '';
+    document.getElementById('w-car-wrap').style.display = vehicles().length ? '' : 'none';
     const blank = !note && !der.projects.length && !der.urlaub;
     wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
@@ -2517,12 +2597,15 @@
     if (wProjectDraft.length && CELL_TYPE_TEXT_SET.has(text)) text = '';
     if (!text) { if (assignments[curCell] && assignments[curCell].type !== 'baustelle') parts.push('Notiz entfernt'); delete assignments[curCell]; }
     else { assignments[curCell] = { text, type: wType.value, auto: false }; parts.push('Termin: „' + text + '"'); }
+    // 3) Fahrzeug des Tages
+    const carVal = document.getElementById('w-car').value, carOld = (PLAN.cars || {})[curCell] || '';
+    if (carVal !== carOld) { setCar(curCellCtx.pid, curCellCtx.dISO, carVal); parts.push('Fahrzeug: ' + (carVal === 'none' ? 'keines' : carVal ? (vehById(carVal) || {}).name : 'Standard')); }
     logChange(`${who} am ${day} – ${parts.length ? parts.join(' · ') : 'keine Änderung'}`, 'woche');
     save(); renderWeek(); closeCellEditor();
   };
   document.getElementById('w-delete').onclick = () => {
     const who = cellPersonName(), day = curCellCtx ? fmt(parse(curCellCtx.dISO)) : '';
-    if (curCell) delete assignments[curCell];
+    if (curCell) { delete assignments[curCell]; if (PLAN.cars) delete PLAN.cars[curCell]; }
     // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
     if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
     logChange(`Eintrag gelöscht (${who}, ${day})`, 'woche');
@@ -2541,6 +2624,7 @@
       for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, ms, row, e); else assignWeekProject(curCellCtx.pid, ms, row, e.gewerk, e); }
       // Manuellen Termin/Notiz zusätzlich auf jeden Werktag übertragen
       if (text) assignments[akey(curCellCtx.pid, isoStr(ms))] = { text, type: wType.value, auto: false };
+      setCar(curCellCtx.pid, isoStr(ms), document.getElementById('w-car').value);
     }
     const who = cellPersonName();
     logChange(`${who}: auf ganze Woche übertragen${wProjectDraft.length ? ' · Einsatz' : ''}${text ? ' · Termin „' + text + '"' : ''}`, 'woche');
@@ -2554,6 +2638,7 @@
       kind: 'cell',
       projects: wProjectDraft.map(e => { const c = { rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }; for (const k of ADDR_KEYS) if (k in e) c[k] = e[k]; return c; }),
       note: text ? { text, type: wType.value } : null,
+      car: document.getElementById('w-car').value,
     };
     toast('Eintrag kopiert – Zielzelle öffnen und „Einfügen"');
     closeCellEditor();
@@ -2563,6 +2648,7 @@
     if (!curCellCtx || !clip || clip.kind !== 'cell') return;
     wProjectDraft = clip.projects.map(e => Object.assign({}, e));
     renderProjRows();
+    if (clip.car != null) document.getElementById('w-car').value = clip.car;
     if (clip.note) { wText.value = clip.note.text; wType.value = clip.note.type; }
     else { wText.value = ''; }
     document.getElementById('w-save').click();
@@ -2663,7 +2749,7 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=52';
+  const TI_SRC = 'termineinladung.html?v=53';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
@@ -2739,6 +2825,9 @@
       pf.mitfahrer = uniq(phs.flatMap(p => (p.assigned || []).map(idOf))).map(monteurName).join(', ');
       const bl = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
       if (bl.length) pf.bl_name = bl[0];
+      // Fahrzeuge der eingeplanten Monteure am ersten Tag des Einsatzes
+      const d0 = phs.map(p => p.start).sort()[0], der0 = {};
+      pf.fahrzeug = uniq(phs.flatMap(p => (p.assigned || []).map(idOf)).map(id => { der0[akey(id, d0)] = { projects: ['x'] }; const v = effVeh(id, d0, der0); return v ? v.name : null; }).filter(Boolean)).join(', ');
     }
     pf.shared = tiSharedOf(row, bar);   // überschreibt auch einen geladenen Entwurf – diese Angaben sind projektweit gleich
     return pf;

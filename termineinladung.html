@@ -683,6 +683,7 @@ function applyPrefill(pf){
     set('datum', pf.datum); set('zeitraum', pf.zeitraum);
   }
   set('mitfahrer', pf.mitfahrer);
+  set('fahrzeug', pf.fahrzeug);
   set('bl_name', pf.bl_name); set('bl_tel', pf.bl_tel); set('bl_mail', pf.bl_mail);
   // Bauleiter aus dem Zeitplan in der Kontaktliste suchen → Telefon/E-Mail ergänzen
   if (pf.bl_name && !pf.bl_tel) {

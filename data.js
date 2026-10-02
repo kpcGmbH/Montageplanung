@@ -26,6 +26,16 @@ const PLAN = {
     eintransporthelfer: { label: 'Eintransporthelfer (ext.)', short: 'Et', color: '#3aa6a0' },
   },
 
+  // Fuhrpark. driver = Stammfahrer (Name wie im Monteure-Team); leer = frei verfügbar.
+  vehicles: [
+    { id: 'kp190', name: 'KP-190', seats: 2, driver: 'Kurt Herrmann' },
+    { id: 'kp150', name: 'KP-150', seats: 4, driver: 'Boban Petrovic' },
+    { id: 'kp155', name: 'KP-155', seats: 2, driver: 'Milenko Stanic' },
+    { id: 'kp160', name: 'KP-160', seats: 2, driver: 'Luis Pinheiro' },
+    { id: 'kp55',  name: 'KP-55',  seats: 3, driver: '' },
+    { id: 'kp180', name: 'KP-180', seats: 3, driver: 'Wigbert Alt', note: 'LKW' },
+  ],
+
   // Monteure-Team (Basis für die Kapazität/Auslastung).
   // type: 'intern' zählt in die Kapazität, 'extern' = zubuchbare Fremdtrupps.
   // trades: Liste von Schlüsseln aus dem Gewerke-Katalog oben.

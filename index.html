@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=101">
+  <link rel="stylesheet" href="styles.css?v=102">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -96,6 +96,9 @@
           <select id="w-type"></select>
         </label>
       </div>
+      <label id="w-car-wrap">Fahrzeug an diesem Tag
+        <select id="w-car"></select>
+      </label>
       <div class="dialog-actions">
         <button id="w-delete" class="btn danger">Löschen</button>
         <button id="w-week" class="btn" title="Diesen Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen">Ganze Woche</button>
@@ -273,8 +276,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=101"></script>
-  <script src="cloud.js?v=101"></script>
-  <script src="app.js?v=101"></script>
+  <script src="data.js?v=102"></script>
+  <script src="cloud.js?v=102"></script>
+  <script src="app.js?v=102"></script>
 </body>
 </html>
