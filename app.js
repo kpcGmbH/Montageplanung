@@ -61,7 +61,13 @@
     else PLAN.changelog = PLAN.changelog || [];
   }
   function saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot())); } catch (e) {} }
-  // ---- Undo/Redo: Verlauf lokaler Änderungen als Snapshot-Historie ----
+  // ---- Undo/Redo: Verlauf lokaler Änderungen ----
+  // Jeder Eintrag hält den Stand VOR und NACH einer eigenen Änderung ({before, after}, beides JSON).
+  // Rückgängig setzt NICHT den alten Gesamtstand wieder ein, sondern nimmt genau diese eine Änderung aus dem
+  // AKTUELLEN Stand heraus (3-Wege-Merge, histStep). Vorher wurde der Snapshot von vor der Änderung komplett
+  // zurückgespielt – und der stammte vom letzten EIGENEN Speichern. Alles, was Kolleg:innen seitdem eingetragen
+  // hatten (per Live-Sync längst sichtbar), verschwand dabei wortlos, auch in der Cloud (gemeldet 09.10.2026:
+  // „frei" bei zwei Monteuren weg, im Verlauf stand nur „Änderung rückgängig gemacht").
   const undoStack = [], redoStack = [], MAX_HIST = 80;
   let histPrev = null, suppressHistory = false;
   function updateUndoUI() {
@@ -70,16 +76,25 @@
     if (r) r.disabled = redoStack.length === 0;
   }
   function histReset() { histPrev = JSON.stringify(snapshot()); undoStack.length = 0; redoStack.length = 0; updateUndoUI(); }
-  function applyHistState(json) {
-    histPrev = json;
+  // Nach einem Hintergrund-Merge aus der Cloud: Vergleichsstand nachziehen. Sonst gilt beim nächsten eigenen
+  // Speichern alles, was andere inzwischen geändert haben, als Teil der eigenen Änderung.
+  function histSync() { histPrev = JSON.stringify(snapshot()); }
+  // Eine Änderung (von → nach) auf den aktuellen Stand anwenden, ohne Fremdes anzufassen.
+  function histStep(vonJson, nachJson) {
+    const cur = JSON.parse(JSON.stringify(snapshot()));
+    const m3 = window.Cloud && Cloud.merge3;
+    return m3 ? m3(JSON.parse(vonJson), JSON.parse(nachJson), cur) : JSON.parse(nachJson);
+  }
+  function applyHistState(state) {
     const keepLog = PLAN.changelog;        // Änderungsverlauf ist append-only – nicht mit zurückrollen
-    applySnapshot(JSON.parse(json));
+    applySnapshot(state);
     PLAN.changelog = keepLog;
+    histSync();
     suppressHistory = true; saveLocal(); if (window.Cloud) Cloud.scheduleSave(snapshot()); suppressHistory = false;
     buildLegend(); render(); updateUndoUI();
   }
-  function undo() { if (!undoStack.length) return; logChange('Änderung rückgängig gemacht'); redoStack.push(histPrev); applyHistState(undoStack.pop()); }
-  function redo() { if (!redoStack.length) return; logChange('Änderung wiederholt'); undoStack.push(histPrev); applyHistState(redoStack.pop()); }
+  function undo() { if (!undoStack.length) return; logChange('Änderung rückgängig gemacht'); const e = undoStack.pop(); redoStack.push(e); applyHistState(histStep(e.after, e.before)); }
+  function redo() { if (!redoStack.length) return; logChange('Änderung wiederholt'); const e = redoStack.pop(); undoStack.push(e); applyHistState(histStep(e.before, e.after)); }
   // Ein Montagefenster umfasst immer alle seine Einsätze – sonst wären sie im Zeitplan unsichtbar, während die
   // Woche sie trotzdem zeigt. fitBar erweitert das Fenster auf Phasen + Bauleitung (nie kürzen). true = angepasst.
   function fitBar(bar) {
@@ -138,7 +153,7 @@
     saveLocal();
     const snap = snapshot(), json = JSON.stringify(snap);
     if (json !== histPrev) {
-      if (!suppressHistory && histPrev !== null) { undoStack.push(histPrev); if (undoStack.length > MAX_HIST) undoStack.shift(); redoStack.length = 0; }
+      if (!suppressHistory && histPrev !== null) { undoStack.push({ before: histPrev, after: json }); if (undoStack.length > MAX_HIST) undoStack.shift(); redoStack.length = 0; }
       histPrev = json;
     }
     if (window.Cloud) Cloud.scheduleSave(snap);
@@ -3159,7 +3174,7 @@
       applySnapshot(data); migrateTeamResources(); seedCrew(); fitWindows(); ensureIds();
       if (mode !== 'merge') scrollTodayPending = true;   // Erststand aus der Cloud → auf aktuelle Woche springen
       saveLocal(); buildLegend(); render();
-      if (mode === 'merge') updateUndoUI(); else histReset();
+      if (mode === 'merge') { histSync(); updateUndoUI(); } else histReset();
       revealApp();
     });
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)

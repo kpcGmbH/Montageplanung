@@ -320,7 +320,9 @@ window.Cloud = (function () {
       saveTimer = setTimeout(async () => {
         if (syncing) { saveTimer = setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(pendingSnap); }, 400); return; }
         syncing = true;
-        try { setStatus('speichere…', 'sync'); await push(pendingSnap); }
+        // Den Stand von JETZT speichern, nicht den vom Klick: kam in den 1,5 s ein Live-Sync dazwischen, enthielte
+        // der vorgemerkte Stand die gerade hereingeholten Änderungen der anderen nicht und überschriebe sie.
+        try { setStatus('speichere…', 'sync'); await push(snapFn ? snapFn() : pendingSnap); }
         catch (e) { if (!e.relogin) setStatus('Speicher-Fehler: ' + e.message, 'warn'); }
         finally { syncing = false; }
       }, 1500);
