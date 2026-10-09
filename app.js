@@ -83,7 +83,9 @@
   function histStep(vonJson, nachJson) {
     const cur = JSON.parse(JSON.stringify(snapshot()));
     const m3 = window.Cloud && Cloud.merge3;
-    return m3 ? m3(JSON.parse(vonJson), JSON.parse(nachJson), cur) : JSON.parse(nachJson);
+    // true = im Konflikt gewinnt der aktuelle Stand: hat jemand anderes dieselbe Stelle inzwischen geändert,
+    // bleibt dessen Eintrag stehen und nur der Rest der eigenen Aktion wird zurückgenommen.
+    return m3 ? m3(JSON.parse(vonJson), JSON.parse(nachJson), cur, true) : JSON.parse(nachJson);
   }
   function applyHistState(state) {
     const keepLog = PLAN.changelog;        // Änderungsverlauf ist append-only – nicht mit zurückrollen

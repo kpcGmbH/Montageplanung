@@ -58,7 +58,10 @@ window.Cloud = (function () {
     return null;
   }
   const mapBy = (arr, k) => { const m = new Map(); if (Array.isArray(arr)) for (const e of arr) m.set(e[k], e); return m; };
-  function merge3(base, local, remote) {
+  // preferRemote (nur für Rückgängig/Wiederholen): im echten Konflikt gewinnt der AKTUELLE Stand (remote) statt
+  // der lokalen Seite. Sonst nähme „Rückgängig" auch das mit, was jemand anderes inzwischen an genau derselben
+  // Stelle eingetragen hat – man darf nur die eigene Aktion zurücknehmen.
+  function merge3(base, local, remote, preferRemote) {
     if (eq(local, remote)) return local;
     if (eq(base, local)) return remote;    // nur entfernt geändert
     if (eq(base, remote)) return local;    // nur lokal geändert
@@ -66,7 +69,7 @@ window.Cloud = (function () {
       const bb = isObj(base) ? base : {}, out = {};
       for (const k of new Set([...Object.keys(local), ...Object.keys(remote)])) {
         const inL = k in local, inR = k in remote, lv = local[k], rv = remote[k], bv = bb[k], inB = k in bb;
-        if (inL && inR) out[k] = merge3(bv, lv, rv);
+        if (inL && inR) out[k] = merge3(bv, lv, rv, preferRemote);
         else if (inL) { if (!(inB && eq(lv, bv))) out[k] = lv; }   // entfernt gelöscht & lokal unverändert → weglassen
         else { if (!(inB && eq(rv, bv))) out[k] = rv; }            // lokal gelöscht & entfernt unverändert → weglassen
       }
@@ -76,7 +79,7 @@ window.Cloud = (function () {
     if (ik) {                              // Arrays mit stabilem Schlüssel: elementweise mergen
       const bm = mapBy(base, ik), rm = mapBy(remote, ik), out = [], seen = new Set();
       for (const e of local) { const id = e[ik]; seen.add(id);
-        if (rm.has(id)) out.push(merge3(bm.get(id), e, rm.get(id)));
+        if (rm.has(id)) out.push(merge3(bm.get(id), e, rm.get(id), preferRemote));
         else if (!(bm.has(id) && eq(e, bm.get(id)))) out.push(e);   // entfernt gelöscht & lokal unverändert → weglassen
       }
       for (const e of remote) { const id = e[ik]; if (seen.has(id)) continue;
@@ -86,7 +89,7 @@ window.Cloud = (function () {
       }
       return out;
     }
-    return local;   // Arrays ohne Schlüssel / Primitive / Typwechsel: letzter gewinnt (lokal)
+    return preferRemote ? remote : local;   // Arrays ohne Schlüssel / Primitive / Typwechsel: letzter gewinnt (lokal)
   }
 
   async function msalInit() {
@@ -268,7 +271,7 @@ window.Cloud = (function () {
     onApply(fn) { applyFn = fn; },
     onStatus(fn) { statusFn = fn; },
     onSnapshot(fn) { snapFn = fn; },   // liefert cloud.js den aktuellen lokalen Stand fürs Mergen
-    merge3(base, local, remote) { return merge3(base, local, remote); },   // 3-Wege-Merge (auch für Tests)
+    merge3(base, local, remote, preferRemote) { return merge3(base, local, remote, preferRemote); },   // 3-Wege-Merge (auch für Tests)
 
     async init() {
       try { await msalInit(); }
