@@ -52,6 +52,7 @@
     if (data && data.assignments) assignments = data.assignments;
     // Fuhrpark (Katalog) + Fahrzeug je Person/Tag; fehlt der Katalog im Stand, bleibt der aus data.js
     if (data && Array.isArray(data.vehicles) && data.vehicles.length) PLAN.vehicles = data.vehicles;
+    for (const v of (PLAN.vehicles || [])) if (v.id === 'kp190' && +v.seats === 2) v.seats = 3;   // Korrektur: KP-170 hat 3 Sitze
     for (const v of (PLAN.vehicles || [])) if (v.name === 'KP-190') v.name = 'KP-170';   // Korrektur: das Fahrzeug heißt KP-170 (ID bleibt, damit Zuordnungen gelten)
     if (data && data.cars && typeof data.cars === 'object') PLAN.cars = data.cars; else PLAN.cars = PLAN.cars || {};
     if (data && data.nights && typeof data.nights === 'object') PLAN.nights = data.nights; else PLAN.nights = PLAN.nights || {};
@@ -1258,6 +1259,37 @@
     const blOnly = !row.capRole && fCat.value === 'bauleitung';
     if (blOnly && phaseDraft.some(p => (p.assigned || []).length)
       && !confirm('Kategorie „Bauleitung": Diesem Termin werden keine Monteure zugeordnet.\nDie vorhandenen Monteur-Phasen werden entfernt. Fortfahren?')) return;
+    // Phasen VOR dem Übernehmen berechnen: taggenaue Zuordnungen, die außerhalb des (geänderten) Phasenzeitraums
+    // liegen, fallen dabei weg – das nicht stillschweigend tun, sondern nachfragen und im Verlauf festhalten.
+    const isProject = row.capRole !== 'extern' && row.capRole !== 'monteur';
+    const lost = new Map();   // Person → entfallende Tage
+    const newPhases = (isProject && phaseDraft.length && !blOnly)
+      ? phaseDraft.map(p => {
+          const weekend = !!p.weekend;
+          const daysN = halfDays(p.days);
+          const s = weekend ? p.start : snapWorkday(p.start);   // Werktags-Einsatz beginnt an einem Werktag
+          const e = endFromDays(s, daysN, weekend);             // Ende = Start + Montagetage (Wochenende ggf. übersprungen)
+          const asg = (p.assigned || []).map(a => {
+            if (typeof a === 'string') return a;                         // ganze Phase → folgt dem Zeitraum
+            // Teilbereich auf das (evtl. geänderte) Phasenfenster begrenzen
+            let rs = a.start > s ? a.start : s, re = a.end < e ? a.end : e;
+            for (let ms = parse(a.start); ms <= parse(a.end); ms = addDays(ms, 1)) {
+              const iso = isoStr(ms);
+              if ((weekend || isWorkdayMs(ms)) && (rs > re || iso < rs || iso > re)) { if (!lost.has(a.id)) lost.set(a.id, []); lost.get(a.id).push(iso); }
+            }
+            if (rs > re) return null;
+            return (rs === s && re === e) ? a.id : { id: a.id, start: rs, end: re };
+          }).filter(Boolean);
+          return Object.assign({ trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg }, p.overnight ? { overnight: true } : {});
+        })
+      : undefined;
+    const dayList = (arr) => { const u = [...new Set(arr)].sort(); return u.slice(0, 6).map(d => fmt(parse(d)).slice(0, 6)).join(', ') + (u.length > 6 ? ' …' : ''); };
+    // Tage, an denen die Person in einer anderen Phase des Fensters weiter eingeplant ist, zählen nicht als verloren
+    const stillOn = new Map();
+    for (const ph of (newPhases || [])) for (const r of assignedRanges(ph)) for (let ms = parse(r.start); ms <= parse(r.end); ms = addDays(ms, 1)) { if (!stillOn.has(r.id)) stillOn.set(r.id, new Set()); stillOn.get(r.id).add(isoStr(ms)); }
+    const lostTxt = [...lost].map(([id, days]) => [id, days.filter(d => !(stillOn.get(id) || new Set()).has(d))]).filter(x => x[1].length).map(([id, days]) => monteurName(id) + ' (' + dayList(days) + ')');
+    if (lostTxt.length && !confirm('Durch den geänderten Zeitraum der Phase entfallen taggenaue Einsätze:\n\n• ' + lostTxt.join('\n• ') + '\n\nTrotzdem speichern?\n(Abbrechen = zurück zur Maske, z. B. um die Montagetage anzupassen)')) return;
+    const idsBefore = new Set((bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)));
     delete bar.weekgen;   // manuell bearbeitet → als echtes Fenster behandeln (nicht mehr als Woche-Fragment auto-aufräumen)
     bar.label = fLabel.value.trim();
     if (isKleinRow(row)) setAddr(bar, { strasse: document.getElementById('f-strasse').value, plz: document.getElementById('f-plz').value, ort: document.getElementById('f-ort').value });
@@ -1276,22 +1308,7 @@
     } else {
       // Projekt-Fenster: kein eigener Bedarf mehr – alles steckt in den Phasen
       bar.cat = fCat.value;
-      bar.phases = (phaseDraft.length && !blOnly)
-        ? phaseDraft.map(p => {
-            const weekend = !!p.weekend;
-            const daysN = halfDays(p.days);
-            const s = weekend ? p.start : snapWorkday(p.start);   // Werktags-Einsatz beginnt an einem Werktag
-            const e = endFromDays(s, daysN, weekend);             // Ende = Start + Montagetage (Wochenende ggf. übersprungen)
-            const asg = (p.assigned || []).map(a => {
-              if (typeof a === 'string') return a;                         // ganze Phase
-              // Teilbereich auf das (evtl. geänderte) Phasenfenster begrenzen
-              let rs = a.start > s ? a.start : s, re = a.end < e ? a.end : e;
-              if (rs > re) return null;
-              return (rs === s && re === e) ? a.id : { id: a.id, start: rs, end: re };
-            }).filter(Boolean);
-            return Object.assign({ trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg }, p.overnight ? { overnight: true } : {});
-          })
-        : undefined;
+      bar.phases = newPhases;
       delete bar.crew;
       // Bauleitung: abgewählte entfernen, taggenaue Bereiche (aus der Woche) aufs Fenster begrenzen, neue = ganzes Fenster
       const bl = [];
@@ -1311,7 +1328,11 @@
     const rowNm = row.site || row.label, barNm = bar.label || '(ohne Bezeichnung)';
     const asgNames = (bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)).filter((v, i, a) => a.indexOf(v) === i).map(monteurName);
     const blNames = [...new Set(blRanges(bar).map(r => r.id))].map(monteurName);
-    const who = (asgNames.length ? ' · Monteure: ' + asgNames.join(', ') : '') + (blNames.length ? ' · Bauleitung: ' + blNames.join(', ') : '');
+    // Im Verlauf festhalten, wer dazugekommen / herausgefallen ist und welche Tage gekürzt wurden
+    const idsAfter = new Set((bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)));
+    const added = [...idsAfter].filter(id => !idsBefore.has(id)).map(monteurName), removed = [...idsBefore].filter(id => !idsAfter.has(id)).map(monteurName);
+    const diff = (current.isNew ? '' : (added.length ? ' · neu: ' + added.join(', ') : '') + (removed.length ? ' · entfernt: ' + removed.join(', ') : '')) + (lostTxt.length ? ' · Tage entfallen: ' + lostTxt.join('; ') : '');
+    const who = (asgNames.length ? ' · Monteure: ' + asgNames.join(', ') : '') + (blNames.length ? ' · Bauleitung: ' + blNames.join(', ') : '') + diff;
     logChange(`Termin „${barNm}" (${rowNm}) ${current.isNew ? 'angelegt' : 'bearbeitet'} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}${who}`, 'zeitplan');
     save(); render(); closeEditor();
   };
