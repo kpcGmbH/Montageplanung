@@ -782,7 +782,7 @@ function showFileBanner(){
 }
 async function saveDraft(){
   // In der App eingebettet: Zwischenstand an die App geben → SharePoint (pro Projekt)
-  if (EMBEDDED){ window.parent.postMessage({ type:'ti-save', state: collectState() }, '*'); return; }
+  if (EMBEDDED){ toParent({ type:'ti-save', state: collectState(), key: currentKey }); return; }
   // Kein Datei-Zugriff möglich: NICHT herunterladen, sondern zum localhost-Generator leiten
   if (!window.showSaveFilePicker && !currentFileHandle){
     if (location.protocol === "file:") { await openViaLocalhost(); }
@@ -839,7 +839,7 @@ function loadDraftFile(file){
 }
 function resetForm(){
   if (!confirm("Aktuelle Eingaben verwerfen und Formular leeren?")) return;
-  if (EMBEDDED){ window.parent.postMessage({ type:'ti-reset' }, '*'); return; }
+  if (EMBEDDED){ toParent({ type:'ti-reset', key: currentKey }); return; }
   try { localStorage.removeItem(LS_KEY); } catch(e){}
   location.reload();
 }
@@ -896,16 +896,17 @@ function renderInvitationHtml(text){
     tbl.forEach(r=>{ out += `<tr><td style="border:1px solid #dcd7d0;">${r[0]||""}</td><td style="border:1px solid #dcd7d0;">${r[1]||""}</td><td style="border:1px solid #dcd7d0;">${r[2]||""}</td></tr>`; });
     out += '</table>'; tbl=[];
   }};
+  let curSec = "";
   for (const raw of lines){
     const t = raw.trim();
     if (t === "") continue;
     if (t.startsWith("BETREFF")) continue;                       // Betreff kommt separat oben hin
-    if (SECTION_DISPLAY[t]){ flushList(); flushTable();
+    if (SECTION_DISPLAY[t]){ flushList(); flushTable(); curSec = t;
       if (!firstSection) out += '<div style="line-height:1.45;">&nbsp;</div>';   // Leerzeile zwischen den Abschnitten
       firstSection = false;
       out += `<div style="font-weight:bold;font-size:14px;color:#895500;border-bottom:1px solid #d7c1ae;padding-bottom:3px;margin:0 0 6px;">${esc(SECTION_DISPLAY[t])}</div>`;
       continue; }
-    if (t.includes(" | ")){ flushList(); tbl.push(t.split(" | ").map(esc)); continue; }
+    if (curSec === "GERÄTE / POSITIONEN" && t.includes(" | ")){ flushList(); tbl.push(t.split(" | ").map(esc)); continue; }
     flushTable();
     if (t.startsWith("- ")){ if(listType!=="ul"){flushList();listType="ul";} listBuf.push(linkify(esc(t.slice(2)))); continue; }
     if (/^\d+\.\s/.test(t)){ if(listType!=="ol"){flushList();listType="ol";} listBuf.push(linkify(esc(t.replace(/^\d+\.\s/,"")))); continue; }
@@ -990,12 +991,13 @@ function downloadWord(){
     tbl.forEach(r=>{ html += `<tr><td>${esc(r[0]||"")}</td><td>${esc(r[1]||"")}</td><td>${esc(r[2]||"")}</td></tr>`; });
     html += "</table>"; tbl=[];
   }};
+  let curSec2 = "";
   for (const raw of lines){
     const t = raw.trim();
     if (t==="") continue;
     if (t.startsWith("BETREFF")){ flushLists(); flushTable(); html += `<p style='color:#666'><b>${esc(t)}</b></p>`; continue; }
-    if (SECTION_DISPLAY[t]){ flushLists(); flushTable(); html += `<h2 style='color:#895500;font-size:13pt;border-bottom:1px solid #d7c1ae'>${esc(SECTION_DISPLAY[t])}</h2>`; continue; }
-    if (t.includes(" | ")){ flushLists(); tbl.push(t.split(" | ")); continue; }
+    if (SECTION_DISPLAY[t]){ curSec2 = t; flushLists(); flushTable(); html += `<h2 style='color:#895500;font-size:13pt;border-bottom:1px solid #d7c1ae'>${esc(SECTION_DISPLAY[t])}</h2>`; continue; }
+    if (curSec2 === "GERÄTE / POSITIONEN" && t.includes(" | ")){ flushLists(); tbl.push(t.split(" | ")); continue; }
     flushTable();
     if (t.startsWith("- ")){ if(!ul){flushLists();html+="<ul>";ul=true;} html += `<li>${linkify(esc(t.slice(2)))}</li>`; continue; }
     if (/^\d+\.\s/.test(t)){ if(!num){flushLists();html+="<ol>";num=true;} html += `<li>${linkify(esc(t.replace(/^\d+\.\s/,"")))}</li>`; continue; }
@@ -1038,17 +1040,24 @@ applyArt(true);
 ready = true;
 // Gemeinsame Projektdaten (Adresse, Ansprechpartner, Zugang, OneDrive-Link): gelten für ALLE Einladungen
 // eines Projekts. Die App liefert sie beim Öffnen und bekommt jede Änderung zurück.
+const PARENT_ORIGIN = (location.origin && location.origin !== 'null') ? location.origin : '*';
+const toParent = (msg) => window.parent.postMessage(msg, PARENT_ORIGIN);
+let currentKey = '';   // Kennung der gerade geöffneten Einladung (von der App) – Rückmeldungen tragen sie mit
 const SHARED_IDS = ['strasse','plz','ort','pb_name','pb_tel','pb_mail','bl_name','bl_tel','bl_mail','vorort','anmeldung','zugang','parken','plan_onedrive'];
 let sharedLive = false, sharedTimer = null;
 function applyShared(sh){
   if (!sh) return;
-  SHARED_IDS.forEach(id=>{ const el=$(id); if (el && sh[id]) el.value = sh[id]; });
+  const ADDR = ['strasse','plz','ort'];
+  SHARED_IDS.forEach(id=>{ const el=$(id); if (!el) return;
+    if (sh[id]) el.value = sh[id];
+    else if (sh._authoritative && ADDR.indexOf(id) < 0) el.value = '';   // projektweit gepflegt → leer heißt leer
+  });
   [['pb_select','pb_name'],['bl_select','bl_name']].forEach(([s,n])=>{ const i = CONTACTS.findIndex(c=>c.name === $(n).value.trim()); $(s).value = i >= 0 ? String(i) : ''; });
   clearMissing(); render();
 }
 // Vorauswahl aus der Planung (Fahrzeug mit Insassen, Monteure, Übernachtung): wird bei jedem Öffnen neu
 // übernommen – außer das Feld wurde in dieser Einladung von Hand geändert.
-const AUTO_IDS = ['fahrzeug','mitfahrer','uebernachtung'];
+const AUTO_IDS = ['fahrzeug','mitfahrer','uebernachtung','datum','zeitraum'];
 let manualFields = {};
 function applyAuto(pf, st){
   if (!pf) return;
@@ -1056,7 +1065,7 @@ function applyAuto(pf, st){
     if (st.__manual) manualFields = Object.assign({}, st.__manual);
     else AUTO_IDS.forEach(id=>{ const v = st['id:'+id]; if (v && v !== 'Nein') manualFields[id] = true; });   // Alt-Entwurf: Eingetragenes bleibt
   }
-  AUTO_IDS.forEach(id=>{ const el=$(id); if (el && !manualFields[id] && pf[id]) el.value = pf[id]; });
+  AUTO_IDS.forEach(id=>{ const el=$(id); if (el && !manualFields[id] && Object.prototype.hasOwnProperty.call(pf, id) && pf[id] != null) el.value = pf[id]; });
   render();
 }
 function postShared(){
@@ -1064,7 +1073,7 @@ function postShared(){
   clearTimeout(sharedTimer);
   sharedTimer = setTimeout(()=>{
     const fields = {}; SHARED_IDS.forEach(id=>{ const el=$(id); if (el) fields[id] = el.value.trim(); });
-    window.parent.postMessage({ type:'ti-shared', fields }, '*');
+    toParent({ type:'ti-shared', fields, key: currentKey });
   }, 500);
 }
 if (EMBEDDED) {
@@ -1076,8 +1085,10 @@ if (EMBEDDED) {
   // Eingebettet in die Montageplanung-App: Speichern/Laden läuft über SharePoint (Elternfenster).
   ['loadBtn','folderBtn'].forEach(id=>{ const b=$(id); if(b) b.style.display='none'; });
   window.addEventListener('message', (e)=>{
+    if (e.source !== window.parent) return;
     const m = e.data || {};
     if (m.type === 'ti-init') {
+      currentKey = m.projectKey || '';
       if (m.state) applyState(m.state); else applyPrefill(m.prefill);
       applyShared(m.prefill && m.prefill.shared);
       applyAuto(m.prefill, m.state);
@@ -1086,7 +1097,7 @@ if (EMBEDDED) {
     else if (m.type === 'ti-saved') { toast('Zwischenstand in SharePoint gespeichert'); }
     else if (m.type === 'ti-save-error') { toast('Speichern fehlgeschlagen' + (m.msg ? ': ' + m.msg : '')); }
   });
-  window.parent.postMessage({ type:'ti-ready' }, '*');
+  toParent({ type:'ti-ready' });
 } else {
   // Standalone: 1) URL-Hash (#d=), 2) eingebetteter Draft, 3) Browser-Autospeicherung
   try {

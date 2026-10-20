@@ -306,15 +306,22 @@
   // Stabile IDs für Balken (bid) und Phasen (pid) – Voraussetzung fürs zuverlässige Zusammenführen (3-Wege-Merge).
   // Backfill deterministisch (rowId + Position + Datum), damit alle Clients einem Alt-Balken dieselbe ID geben.
   function ensureIds() {
-    const proj = PLAN.groups.find(g => g.name === 'Projekte');
-    if (!proj) return;
-    for (const row of proj.rows) (row.bars || []).forEach((bar, bi) => {
-      if (!bar.bid) bar.bid = 'b~' + row.id + '~' + (bar.start || '') + '~' + (bar.end || '') + '~' + bi;
-      (bar.phases || []).forEach((ph, pi) => {
-        if (!ph.pid) ph.pid = bar.bid + '~p' + pi + '~' + (ph.trade || '');
-        normalizePhase(ph);   // Altdaten: days/weekend nachziehen, end konsistent zu start+days
+    // Eindeutig innerhalb der Liste: fällt die deterministische ID mit einer vorhandenen zusammen, Zusatz anhängen
+    const uniq = (id, taken) => { let x = id; while (taken.has(x)) x = id + '~' + Math.random().toString(36).slice(2, 7); taken.add(x); return x; };
+    const fix = (bars, prefix, withPhases) => {
+      const taken = new Set();
+      (bars || []).forEach((bar, bi) => {
+        if (!bar.bid || taken.has(bar.bid)) bar.bid = uniq(prefix + '~' + (bar.start || '') + '~' + (bar.end || '') + '~' + bi, taken); else taken.add(bar.bid);
+        if (!withPhases) return;
+        const pt = new Set();
+        (bar.phases || []).forEach((ph, pi) => {
+          if (!ph.pid || pt.has(ph.pid)) ph.pid = uniq(bar.bid + '~p' + pi + '~' + (ph.trade || ''), pt); else pt.add(ph.pid);
+          normalizePhase(ph);   // Altdaten: days/weekend nachziehen, end konsistent zu start+days
+        });
       });
-    });
+    };
+    for (const g of PLAN.groups) for (const row of g.rows) fix(row.bars, 'b~' + row.id, g.name === 'Projekte');
+    for (const m of (PLAN.team || [])) fix(m.bars, 't~' + m.id, false);   // Urlaub/Buchungen: sonst kein Schlüssel fürs Zusammenführen
   }
 
   // Einmalige Migration: die alten Sammelzeilen (Monteure Urlaub / Urlaub / ext. Monteure …)
@@ -431,24 +438,34 @@
 
   // ---- Engpass: konkret zugeordnete Monteure mit überlappenden Einsätzen (je Phase) ----
   function computeConflicts() {
-    const byMonteur = {};
-    const add = (id, s, e, bar) => { (byMonteur[id] = byMonteur[id] || []).push({ x0: dayIndex(parse(s), startMs), x1: dayIndex(parse(e), startMs), bar }); };
+    // Je Monteur und Arbeitstag: welche Fenster ihn belegen (halber letzter Tag = 0,5). Doppelt verplant ist,
+    // wer an einem Tag in mindestens zwei Fenstern zusammen ≥ 2 belegt ist (halber Tag + ganzer Tag ist erlaubt).
+    const load = {};
+    const add = (id, s, e, bar, weekend, halfEnd) => {
+      if (!s || !e) return;
+      for (let ms = parse(s); ms <= parse(e); ms = addDays(ms, 1)) {
+        if (!weekend && !isWorkdayMs(ms)) continue;
+        const w = (halfEnd && isoStr(ms) === halfEnd) ? 0.5 : 1;
+        const day = ((load[id] = load[id] || {})[ms] = load[id][ms] || new Map());
+        day.set(bar, Math.max(day.get(bar) || 0, w));
+      }
+    };
     for (const g of PLAN.groups) for (const r of g.rows) {
       if (r.archived) continue;
       for (const bar of r.bars) {
-      if (bar.phases && bar.phases.length) {
-        for (const ph of bar.phases) for (const rg of assignedRanges(ph)) add(rg.id, rg.start, rg.end, bar);
-      } else if (bar.crew) {
-        for (const id of (bar.crew.assigned || [])) add(id, bar.crew.start || bar.start, bar.crew.end || bar.end, bar);
-      }
+        if (bar.phases && bar.phases.length) {
+          for (const ph of bar.phases) for (const rg of assignedRanges(ph)) add(rg.id, rg.start, rg.end, bar, !!ph.weekend, isHalf(ph) ? ph.end : null);
+        } else if (bar.crew) {
+          for (const id of (bar.crew.assigned || [])) add(id, bar.crew.start || bar.start, bar.crew.end || bar.end, bar, false, null);
+        }
       }
     }
     const conflict = new Set();
-    for (const id in byMonteur) {
-      const list = byMonteur[id].sort((a, z) => a.x0 - z.x0);
-      for (let i = 1; i < list.length; i++) {
-        if (list[i].x0 <= list[i-1].x1) { conflict.add(list[i].bar); conflict.add(list[i-1].bar); }
-      }
+    for (const id in load) for (const ms in load[id]) {
+      const day = load[id][ms];
+      if (day.size < 2) continue;
+      let sum = 0; for (const w of day.values()) sum += w;
+      if (sum >= 2) for (const bar of day.keys()) conflict.add(bar);
     }
     return conflict;
   }
@@ -637,23 +654,7 @@
         const hit = phs.some(ph => assignedRanges(ph).some(r => r.id === pid && parse(r.start) <= D && parse(r.end) >= D));
         if (!hit) continue;
         bar.start = sh(bar.start); bar.end = sh(bar.end);
-        for (const ph of phs) {
-          const oldStart = ph.start;
-          if (!(+ph.days > 0)) ph.days = daysCount(oldStart, ph.end || oldStart, ph.weekend);
-          let ns = sh(oldStart);
-          if (!ph.weekend) ns = snapWorkday(ns);
-          const pdelta = Math.round((parse(ns) - parse(oldStart)) / MS_DAY);
-          const psh = (iso) => isoStr(addDays(parse(iso), pdelta));
-          ph.start = ns; ph.end = endFromDays(ns, ph.days, ph.weekend);
-          const nsMs = parse(ns), neMs = parse(ph.end);
-          ph.assigned = (ph.assigned || []).map(a => {
-            if (typeof a === 'string') return a;
-            let rs = parse(psh(a.start)), re = parse(psh(a.end));
-            if (rs < nsMs) rs = nsMs; if (re > neMs) re = neMs;
-            if (rs > re) return null;
-            return { id: a.id, start: isoStr(rs), end: isoStr(re) };
-          }).filter(Boolean);
-        }
+        shiftBarContent(bar, delta);
         logChange(`Einsatz „${bar.label || nm}" (${nm}, ${monteurName(pid)}) verschoben → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}`, 'woche');
         save();
         return;   // nur den einen (getroffenen) Einsatz verschieben
@@ -1021,6 +1022,32 @@
   }
 
   // ---- Ziehen / Größe ändern ----
+  // Verschiebt Phasen (Werktagsregel, Zuordnungen auf das neue Phasenfenster begrenzt), Alt-Bedarf und
+  // taggenaue Bauleitung eines Fensters um delta Kalendertage. Das Fenster selbst (start/end) setzt der Aufrufer.
+  function shiftBarContent(bar, delta) {
+    const sh = (iso) => isoStr(addDays(parse(iso), delta));
+    for (const ph of (bar.phases || [])) {
+      const oldStart = ph.start;
+      if (!(+ph.days > 0)) ph.days = daysCount(oldStart, ph.end || oldStart, ph.weekend);
+      let ns = sh(oldStart);
+      if (!ph.weekend) ns = snapWorkday(ns);   // Werktags-Einsatz nicht auf Sa/So beginnen lassen
+      const pdelta = Math.round((parse(ns) - parse(oldStart)) / MS_DAY);
+      const psh = (iso) => isoStr(addDays(parse(iso), pdelta));
+      ph.start = ns;
+      ph.end = endFromDays(ns, ph.days, ph.weekend);
+      const nsMs = parse(ns), neMs = parse(ph.end);
+      ph.assigned = (ph.assigned || []).map(a => {
+        if (typeof a === 'string') return a;                       // ganze Phase → wandert automatisch mit
+        let rs = parse(psh(a.start)), re = parse(psh(a.end));
+        if (rs < nsMs) rs = nsMs; if (re > neMs) re = neMs;        // auf neues Phasenfenster begrenzen
+        if (rs > re) return null;
+        return { id: a.id, start: isoStr(rs), end: isoStr(re) };
+      }).filter(Boolean);
+    }
+    if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
+    // Bauleitung wandert mit (sonst zöge die Fenster-Regel das Fenster über die alten Tage zurück)
+    if (bar.bl) bar.bl = bar.bl.map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+  }
   function attachDrag(b, opts) {
     opts = opts || {};
     b.addEventListener('pointerdown', (e) => {
@@ -1053,29 +1080,7 @@
           bar.start = isoStr(addDays(startMs, nx0));
           bar.end = isoStr(addDays(startMs, nx1));
           // Beim Verschieben (nicht Resize) wandern die Gewerke/Phasen + Zuordnungen mit.
-          if (mode === 'move') {
-            const delta = nx0 - ox0;
-            const sh = (iso) => isoStr(addDays(parse(iso), delta));
-            for (const ph of (bar.phases || [])) {
-              const oldStart = ph.start;
-              if (!(+ph.days > 0)) ph.days = daysCount(oldStart, ph.end || oldStart, ph.weekend);
-              let ns = sh(oldStart);
-              if (!ph.weekend) ns = snapWorkday(ns);   // Werktags-Einsatz nicht auf Sa/So beginnen lassen
-              const pdelta = Math.round((parse(ns) - parse(oldStart)) / MS_DAY);
-              const psh = (iso) => isoStr(addDays(parse(iso), pdelta));
-              ph.start = ns;
-              ph.end = endFromDays(ns, ph.days, ph.weekend);
-              const nsMs = parse(ns), neMs = parse(ph.end);
-              ph.assigned = (ph.assigned || []).map(a => {
-                if (typeof a === 'string') return a;                       // ganze Phase → wandert automatisch mit
-                let rs = parse(psh(a.start)), re = parse(psh(a.end));
-                if (rs < nsMs) rs = nsMs; if (re > neMs) re = neMs;        // auf neues Phasenfenster begrenzen
-                if (rs > re) return null;
-                return { id: a.id, start: isoStr(rs), end: isoStr(re) };
-              }).filter(Boolean);
-            }
-            if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
-          }
+          if (mode === 'move') shiftBarContent(bar, nx0 - ox0);
           if (mode !== 'move' && fitBar(bar)) toast('Das Fenster kann nicht kürzer sein als die darin geplanten Einsätze – zuerst die Phase kürzen.');
           const rowNm = b._row.site || b._row.label, barNm = bar.label || '(ohne Bezeichnung)';
           const verb = mode === 'move' ? 'verschoben' : 'Dauer geändert';
@@ -1120,9 +1125,10 @@
       box.appendChild(chip);
     }
   }
+  const isProjRow = (row) => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return !!(g && g.rows.indexOf(row) >= 0); };
   function applyCatMode() {
     if (!current) return;
-    const proj = current.row.capRole !== 'extern' && current.row.capRole !== 'monteur';
+    const proj = isProjRow(current.row);   // Phasen/Bauleitung/Hotel/Einladung nur bei Projekten (nicht bei Ressourcen-/Bauleiter-Zeilen)
     document.getElementById('f-crew-wrap').style.display = (proj && fCat.value !== 'bauleitung') ? '' : 'none';   // Bauleitungs-Termin: keine Monteur-Phasen
     document.getElementById('f-bl-wrap').style.display = proj ? '' : 'none';
   }
@@ -1250,11 +1256,11 @@
     // Kontextabhängige Felder
     blDraft = new Set(blRanges(bar).map(r => r.id)); renderBlChips();
     document.getElementById('f-hotel').value = bar.hotel || '';
-    document.getElementById('f-hotel-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';
+    document.getElementById('f-hotel-wrap').style.display = isProjRow(row) ? '' : 'none';
     applyCatMode();   // Montage-Phasen nur bei Projekten (nicht bei Kategorie „Bauleitung"), Bauleitung nur bei Projekten
     document.getElementById('f-cat-wrap').style.display = (isExtern || isMonteur) ? 'none' : '';    // Kategorie/Farbe ergibt sich bei Monteuren aus intern/extern
     document.getElementById('f-size-wrap').style.display = isExtern ? '' : 'none';                  // Truppstärke nur bei externen Buchungen
-    document.getElementById('f-ti').style.display = (isExtern || isMonteur) ? 'none' : '';          // Termineinladung nur bei Projekt-Montagen
+    document.getElementById('f-ti').style.display = isProjRow(row) ? '' : 'none';                   // Termineinladung nur bei Projekt-Montagen
     document.getElementById('f-size').value = bar.size || (row._member && row._member.size) || 1;
     // Phasen laden – bestehender Sammelbedarf (crew) wird verlustfrei als erste Phase übernommen
     const cloneAssigned = (arr) => (arr || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: a.start, end: a.end }));
@@ -1262,7 +1268,7 @@
       phaseDraft = bar.phases.map(p => {
         const weekend = !!p.weekend;
         const daysN = +p.days > 0 ? p.days : daysCount(p.start, p.end || p.start, weekend);
-        return { trade: p.trade || 'edelstahl', start: p.start, days: daysN, weekend, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned), overnight: !!p.overnight };
+        return { pid: p.pid, trade: p.trade || 'edelstahl', start: p.start, days: daysN, weekend, end: p.end, count: p.count || 1, assigned: cloneAssigned(p.assigned), overnight: !!p.overnight };
       });
     } else if (bar.crew && ((bar.crew.assigned || []).length || bar.crew.trade)) {
       // Alt-Bedarf nur übernehmen, wenn er wirklich etwas enthält (Gewerk oder zugeordnete Monteure).
@@ -1280,12 +1286,12 @@
   document.getElementById('f-save').onclick = () => {
     if (!current) return;
     const { row, bar } = current;
-    const blOnly = !row.capRole && fCat.value === 'bauleitung';
+    const blOnly = isProjRow(row) && fCat.value === 'bauleitung';
     if (blOnly && phaseDraft.some(p => (p.assigned || []).length)
       && !confirm('Kategorie „Bauleitung": Diesem Termin werden keine Monteure zugeordnet.\nDie vorhandenen Monteur-Phasen werden entfernt. Fortfahren?')) return;
     // Phasen VOR dem Übernehmen berechnen: taggenaue Zuordnungen, die außerhalb des (geänderten) Phasenzeitraums
     // liegen, fallen dabei weg – das nicht stillschweigend tun, sondern nachfragen und im Verlauf festhalten.
-    const isProject = row.capRole !== 'extern' && row.capRole !== 'monteur';
+    const isProject = isProjRow(row);
     const lost = new Map();   // Person → entfallende Tage
     const newPhases = (isProject && phaseDraft.length && !blOnly)
       ? phaseDraft.map(p => {
@@ -1304,7 +1310,7 @@
             if (rs > re) return null;
             return (rs === s && re === e) ? a.id : { id: a.id, start: rs, end: re };
           }).filter(Boolean);
-          return Object.assign({ trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg }, p.overnight ? { overnight: true } : {});
+          return Object.assign(p.pid ? { pid: p.pid } : {}, { trade: p.trade, start: s, days: daysN, weekend, end: e, count: Math.max(1, +p.count || 1), assigned: asg }, p.overnight ? { overnight: true } : {});
         })
       : undefined;
     const dayList = (arr) => { const u = [...new Set(arr)].sort(); return u.slice(0, 6).map(d => fmt(parse(d)).slice(0, 6)).join(', ') + (u.length > 6 ? ' …' : ''); };
@@ -1332,6 +1338,7 @@
     } else {
       // Projekt-Fenster: kein eigener Bedarf mehr – alles steckt in den Phasen
       bar.cat = fCat.value;
+      if (isProject) {
       bar.phases = newPhases;
       delete bar.crew;
       // Bauleitung: abgewählte entfernen, taggenaue Bereiche (aus der Woche) aufs Fenster begrenzen, neue = ganzes Fenster
@@ -1342,12 +1349,14 @@
           const rs = a.start > s ? a.start : s, re = a.end < e ? a.end : e;
           return rs > re ? null : { id, start: rs, end: re };
         }).filter(Boolean);
-        if (had.length) bl.push(...had); else bl.push(id);
+        if (had.length) bl.push(...had);
+        else if (!(bar.bl || []).some(a => idOf(a) === id)) bl.push(id);   // neu gewählt = ganzes Fenster; alte Tage außerhalb entfallen
       }
       if (bl.length) bar.bl = bl; else delete bar.bl;
       const hotel = document.getElementById('f-hotel').value.trim();
       if (hotel) bar.hotel = hotel; else delete bar.hotel;
       if (fitBar(bar)) toast('Montagefenster auf die geplanten Einsätze erweitert (' + fmt(parse(bar.start)) + '–' + fmt(parse(bar.end)) + ').');
+      }
     }
     const rowNm = row.site || row.label, barNm = bar.label || '(ohne Bezeichnung)';
     const asgNames = (bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)).filter((v, i, a) => a.indexOf(v) === i).map(monteurName);
@@ -1377,14 +1386,9 @@
     const len = Math.round((parse(bar.end) - parse(bar.start)) / MS_DAY);
     const ns = snapWorkday(isoStr(addDays(parse(bar.end), 1)));   // Kopie startet am nächsten Werktag nach dem Original
     const delta = Math.round((parse(ns) - parse(bar.start)) / MS_DAY);
-    const sh = (iso) => isoStr(addDays(parse(iso), delta));
     clone.start = ns; clone.end = isoStr(addDays(parse(ns), len));
-    (clone.phases || []).forEach(p => {
-      delete p.pid;
-      p.start = sh(p.start); p.end = sh(p.end);
-      p.assigned = (p.assigned || []).map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
-    });
-    if (clone.crew && clone.crew.start) { clone.crew.start = sh(clone.crew.start); clone.crew.end = sh(clone.crew.end || clone.crew.start); }
+    (clone.phases || []).forEach(p => { delete p.pid; });
+    shiftBarContent(clone, delta);   // Phasen mit Werktagsregel, Zuordnungen und Bauleitung mitverschieben
     clone.label = bar.label ? bar.label + ' (Kopie)' : 'Kopie';
     row.bars.push(clone);
     logChange(`Montagefenster „${bar.label || ''}" (${row.site || row.label}) dupliziert → ${fmt(parse(clone.start))}–${fmt(parse(clone.end))}`, 'zeitplan');
@@ -1394,7 +1398,8 @@
   document.getElementById('f-ti').onclick = () => {
     if (!current) return;
     const { row, bar } = current;
-    closeEditor();
+    document.getElementById('f-save').click();
+    if (current || row.bars.indexOf(bar) < 0) return;   // Speichern abgebrochen
     openTermineinladung(row, bar);
   };
   document.getElementById('f-cancel').onclick = () => {
@@ -1652,7 +1657,7 @@
       else { const p = parseLabel(row.label); nr = p.nr; ort = p.ort; name = p.name; }
     }
     pSite.value = site; pNr.value = nr; pOrt.value = ort; pName.value = name;
-    const pa = row ? rowAddr(row) : { strasse: '', plz: '' };
+    const pa = row ? rowAddr(row) : (presetSite ? rowAddr({ site: presetSite }) : { strasse: '', plz: '' });   // neuer Bereich: Adresse der Baustelle übernehmen
     document.getElementById('p-strasse').value = pa.strasse; document.getElementById('p-plz').value = pa.plz;
     applyAreaMode();
     poverlay.hidden = false;
@@ -1671,9 +1676,10 @@
       : { site: undefined, nummer: nr, ort, name, label: composeLabel(nr, ort, name) };
     fields.strasse = document.getElementById('p-strasse').value.trim() || undefined;
     fields.plz = document.getElementById('p-plz').value.trim() || undefined;
-    if (site) {   // Adresse gilt für die ganze Baustelle → auf alle Bereiche übertragen
+    if (site) {   // Adresse gilt für die ganze Baustelle → auf alle Bereiche übertragen (leer lassen = vorhandene behalten)
       const pg = PLAN.groups.find(x => x.name === 'Projekte');
-      for (const r of (pg ? pg.rows : [])) if (r.site === site) { r.strasse = fields.strasse; r.plz = fields.plz; }
+      if (fields.strasse || fields.plz) { for (const r of (pg ? pg.rows : [])) if (r.site === site) { r.strasse = fields.strasse; r.plz = fields.plz; } }
+      else { const a = rowAddr({ site }); fields.strasse = a.strasse || undefined; fields.plz = a.plz || undefined; }
     }
     if (curProject) {
       Object.assign(curProject, fields);
@@ -2979,25 +2985,40 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=55';
+  const TI_SRC = 'termineinladung.html?v=56';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
   // Gewerk → Vorbelegung in der Einladung (Tätigkeit bzw. Eintransport-Option)
   const TI_TRADE = { edelstahl: { taet: ['edelstahl'] }, elektrik: { art: 'anschluss_elektro', taet: ['elektro'] }, sanitaer: { art: 'anschluss_sanitaer', taet: ['sanitaer'] }, sanitaer_klein: { art: 'anschluss_sanitaer', taet: ['sanitaer'] }, eintransporthelfer: { et: [3] }, lagerist: {} };
   // Schlüssel der Phase für den Entwurf: Gewerk (+ laufende Nummer bei mehreren Phasen desselben Gewerks)
+  const tiHash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0; return h.toString(36); };
+  // Phase über ihre feste ID (pid) – bleibt gleich, wenn andere Phasen gelöscht/umsortiert werden
+  const tiPhaseId = (bar, idx) => { const ph = bar.phases[idx]; return ph.pid ? 'p' + tiHash(ph.pid) : tiPhaseKey(bar, idx); };
   function tiPhaseKey(bar, idx) {
     const ph = bar.phases[idx], t = ph.trade || 'gewerk';
     const nth = bar.phases.slice(0, idx).filter(p => (p.trade || 'gewerk') === t).length;
     return t + (nth ? (nth + 1) : '');
   }
-  function tiDraftName(row, bar, phIdx) {
+  function tiDraftName(row, bar, phIdx, legacy) {
     const name = bar ? (bar.label || row.site || row.label || '') : (row.site || row.label || '');
     const base = ((row.nummer ? row.nummer + ' ' : '') + name)
       .replace(/[^0-9A-Za-zÄÖÜäöüß ._-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
-    const barKey = bar ? '__' + String(bar.bid || bar.start || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
-    const idxs = tiIdxs(bar, phIdx), phKey = idxs.length ? '__' + idxs.map(i => tiPhaseKey(bar, i)).join('-') : '';
-    return (base || 'projekt') + '__' + row.id + barKey + phKey + '.json';
+    const idxs = tiIdxs(bar, phIdx);
+    if (legacy) {   // Benennung bis v112 (zum Wiederfinden alter Entwürfe)
+      const barKey = bar ? '__' + String(bar.bid || bar.start || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
+      return (base || 'projekt') + '__' + row.id + barKey + (idxs.length ? '__' + idxs.map(i => tiPhaseKey(bar, i)).join('-') : '') + '.json';
+    }
+    const barKey = bar ? '__b' + tiHash(String(bar.bid || bar.start || '')) : '';
+    return (base || 'projekt') + '__' + row.id + barKey + (idxs.length ? '__' + idxs.map(i => tiPhaseId(bar, i)).join('-') : '') + '.json';
+  }
+  const tiKey = () => tiProject ? tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : '') + tiIdxs(tiBar, tiPhase).map(i => '~' + tiPhaseId(tiBar, i)).join('') : '';
+  // Nach einem Abgleich sind Zeile/Fenster neue Objekte → über die IDs wiederfinden, bevor etwas geschrieben wird
+  function tiResolve() {
+    const g = PLAN.groups.find(x => x.name === 'Projekte');
+    const row = (g && tiProject && g.rows.find(r => r.id === tiProject.id)) || tiProject;
+    const bar = tiBar ? ((row && row.bars.find(b => b === tiBar || (tiBar.bid && b.bid === tiBar.bid))) || tiBar) : null;
+    tiProject = row; tiBar = bar;
   }
   // ---- Gemeinsame Projektdaten für alle Einladungen eines Projekts (Adresse, Ansprechpartner, Zugang, OneDrive) ----
   // Projekt: Straße/PLZ an der Zeile, der Rest in row.ti. Kleinprojekt: alles an der einzelnen Montage (bar / bar.ti).
@@ -3011,9 +3032,10 @@
       if (sib) blob = sib.ti;
     }
     const a = host === row ? rowAddr(row) : { strasse: host.strasse || '', plz: host.plz || '', ort: host.ort || '' };
-    return Object.assign({}, blob || {}, { strasse: a.strasse, plz: a.plz, ort: (blob && blob.ort) || a.ort });
+    return Object.assign({}, blob || {}, { strasse: a.strasse, plz: a.plz, ort: (blob && blob.ort) || a.ort, _authoritative: !!blob });
   }
   function tiStoreShared(fields) {
+    tiResolve();
     const row = tiProject, host = row && tiSharedHost(row, tiBar); if (!host || !fields) return;
     const before = JSON.stringify([host.strasse, host.plz, host.ort, host.ti]);
     const blob = {};
@@ -3033,7 +3055,7 @@
   function tiPrefill(row, bar, phIdx) {
     const phs = tiIdxs(bar, phIdx).map(i => bar.phases[i]);
     let datum = '', zeitraum = '', objektname = row.site || row.label || '';
-    const span = (s, e) => { if (s === e) datum = s; else zeitraum = fmt(parse(s)) + '–' + fmt(parse(e)); };
+    const span = (s, e) => { datum = s; zeitraum = s === e ? '' : fmt(parse(s)) + '–' + fmt(parse(e)); };   // Datum = erster Tag (auch bei Einsatzart ohne Zeitraum sichtbar)
     if (phs.length) {
       // Einladung für ein Gewerk (oder mehrere derselben Person): Zeitraum der Phase(n); Bezeichnung nur bei Kleinprojekten aus dem Balken
       if (isKleinRow(row)) objektname = bar.label || objektname;
@@ -3062,7 +3084,7 @@
     if (bar && planPhs.length) {
       const uniq = (arr) => [...new Set(arr)];
       const pids = uniq(planPhs.flatMap(p => assignedRanges(p).map(r => r.id)));
-      if (pids.length) pf.mitfahrer = pids.map(monteurName).join(', ');
+      pf.mitfahrer = pids.map(monteurName).join(', ');
       // Übernachtung: tatsächlich geplante Nächte (Vorgabe der Phase abzüglich abgewählter + einzeln gesetzte)
       let nights = 0;
       for (const ph of planPhs) for (const r of assignedRanges(ph)) for (let ms = parse(r.start); ms <= parse(r.end); ms = addDays(ms, 1)) {
@@ -3079,24 +3101,31 @@
         selMonday = mondayMs(parse(d0));
         const der = weekDerived(), occ = carOcc(d0, der);
         const used = uniq(pids.map(id => { const v = effVeh(id, d0, der); return v ? v.id : null; }).filter(Boolean));
-        pf.fahrzeug = used.map(id => vehLabel(vehById(id)) + ': ' + (occ[id] || []).join(', ')).join(' · ');
+        pf.fahrzeug = '' + used.map(id => vehLabel(vehById(id)) + ': ' + (occ[id] || []).join(', ')).join(' · ');
       } finally { selMonday = keepMonday; }
     }
     pf.shared = tiSharedOf(row, bar);   // überschreibt auch einen geladenen Entwurf – diese Angaben sind projektweit gleich
     return pf;
   }
+  let tiSeq = 0;
+  const TI_ORIGIN = (location.origin && location.origin !== 'null') ? location.origin : '*';
   async function tiSendInit() {
     if (!tiProject || !tiReady || !tiFrame.contentWindow) return;
+    const seq = ++tiSeq;   // wird inzwischen eine andere Einladung geöffnet, gehört diese Antwort nicht mehr dazu
     let state = null;
     const fresh = tiFresh; tiFresh = false;   // „Formular leeren": Entwurf nicht wieder laden
     if (!fresh && window.Cloud && Cloud.isReady()) {
       tiStatus.textContent = 'lade Zwischenstand …';
-      try { state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase)); } catch (e) { /* kein Draft / offline */ }
+      try {
+        state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase));
+        if (!state && seq === tiSeq) state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase, true));
+      } catch (e) { /* kein Draft / offline */ }
     }
+    if (seq !== tiSeq || !tiReady) return;
     tiStatus.textContent = state ? 'Zwischenstand geladen'
       : (window.Cloud && Cloud.isReady()) ? 'neu · aus Projektdaten vorbefüllt'
       : 'nicht angemeldet – kein SharePoint-Speichern';
-    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiProject.id + (tiBar ? '~' + (tiBar.bid || '') : '') + tiIdxs(tiBar, tiPhase).map(i => '~' + tiPhaseKey(tiBar, i)).join(''), prefill: tiPrefill(tiProject, tiBar, tiPhase), state: state || null }, '*');
+    tiFrame.contentWindow.postMessage({ type: 'ti-init', projectKey: tiKey(), prefill: tiPrefill(tiProject, tiBar, tiPhase), state: state || null }, TI_ORIGIN);
   }
   // Formular frisch laden – sonst blieben Eingaben der zuvor geöffneten Einladung stehen
   function tiReload() {
@@ -3105,6 +3134,7 @@
     else { try { tiFrame.contentWindow.location.reload(); } catch (e) { tiFrame.setAttribute('src', TI_SRC); } }
   }
   function openTermineinladung(row, bar, phIdx) {
+    tiSeq++;
     tiProject = row; tiBar = bar || null; tiPhase = tiIdxs(tiBar, phIdx);
     const tl = tiPhase.length ? ' · ' + tiTradeLabels(tiBar, tiPhase) : '';
     tiTitle.textContent = 'Termineinladung · ' + ((bar && bar.label) || row.site || row.label || '') + tl;
@@ -3117,15 +3147,20 @@
   window.addEventListener('message', async (e) => {
     if (!tiFrame || e.source !== tiFrame.contentWindow) return;
     const m = e.data || {};
+    if (m.type !== 'ti-ready' && m.key != null && m.key !== tiKey()) return;   // Nachricht einer zuvor geöffneten Einladung
     if (m.type === 'ti-ready') { tiReady = true; tiSendInit(); }
     else if (m.type === 'ti-save') {
-      if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, '*'); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
+      if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, TI_ORIGIN); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
       tiStatus.textContent = 'speichere …';
-      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, '*'); tiStatus.textContent = 'in SharePoint gespeichert'; }
-      catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, '*'); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
+      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, TI_ORIGIN); tiStatus.textContent = 'in SharePoint gespeichert'; }
+      catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, TI_ORIGIN); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
     }
     else if (m.type === 'ti-shared') { tiStoreShared(m.fields); }
-    else if (m.type === 'ti-reset') { tiFresh = true; tiReload(); }
+    else if (m.type === 'ti-reset') {
+      // „Formular leeren": auch den gespeicherten Entwurf leeren, sonst käme er beim nächsten Öffnen zurück
+      if (window.Cloud && Cloud.isReady()) Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), null).catch(() => {});
+      tiFresh = true; tiReload();
+    }
   });
 
   // ---- Cloud-Sync (Microsoft-Login + SharePoint), optional ----
@@ -3201,9 +3236,10 @@
       applySnapshot(data); migrateTeamResources(); seedCrew(); fitWindows(); ensureIds();
       if (mode !== 'merge') scrollTodayPending = true;   // Erststand aus der Cloud → auf aktuelle Woche springen
       saveLocal(); buildLegend(); render();
-      if (mode === 'merge') { histSync(); updateUndoUI(); } else histReset();
-      revealApp();
+      if (mode === 'merge') { histSync(); updateUndoUI(); } else { histReset(); revealApp(); }   // Abgleich im Hintergrund: Ansicht nicht verspringen
     });
+    // Solange ein Dialog/die Termineinladung offen ist, nicht abgleichen – die Maske hält Verweise auf die Daten
+    Cloud.onCanSync(() => !document.querySelector('.overlay:not([hidden])') && (!tiView || tiView.hidden));
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
     Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
   } else {

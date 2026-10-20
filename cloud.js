@@ -89,7 +89,16 @@ window.Cloud = (function () {
       }
       return out;
     }
-    return preferRemote ? remote : local;   // Arrays ohne Schlüssel / Primitive / Typwechsel: letzter gewinnt (lokal)
+    if (Array.isArray(local) && Array.isArray(remote)) {
+      // Arrays ohne Schlüssel (z. B. Zuordnungen „ganze Phase" als Text, Gewerke-Listen): als Menge zusammenführen –
+      // beide Seiten dürfen Einträge hinzufügen/entfernen, statt dass eine Seite die andere komplett überschreibt.
+      const key = (x) => JSON.stringify(x), B = new Set((Array.isArray(base) ? base : []).map(key)), R = new Set(remote.map(key));
+      const out = [], seen = new Set();
+      for (const e of local) { const k = key(e); if (seen.has(k)) continue; if (R.has(k) || !B.has(k)) { out.push(e); seen.add(k); } }
+      for (const e of remote) { const k = key(e); if (seen.has(k)) continue; if (!B.has(k)) { out.push(e); seen.add(k); } }
+      return out;
+    }
+    return preferRemote ? remote : local;   // Primitive / Typwechsel: letzter gewinnt (lokal)
   }
 
   async function msalInit() {
@@ -115,16 +124,19 @@ window.Cloud = (function () {
   // mitten in der Arbeit nur einen Hinweis zeigen und die ungespeicherten Änderungen für danach sichern.
   let needRelogin = false, initPhase = false;
   const UNSAVED_KEY = 'montageplanung_unsaved', RELOGIN_TS_KEY = 'montageplanung_relogin_ts';
-  function stashUnsaved() {
+  // Noch nicht in der Cloud angekommene Änderungen (mit dem Stand, auf dem sie beruhen) im Browser merken:
+  // nach einem Speicherfehler, geschlossenem Tab oder neuer Anmeldung werden sie beim nächsten Start zusammengeführt.
+  function rememberUnsaved(local) {
     try {
-      const local = snapFn ? snapFn() : null;
-      if (local && baseSnap && !eq(local, baseSnap)) sessionStorage.setItem(UNSAVED_KEY, JSON.stringify({ base: baseSnap, local, ts: Date.now() }));
+      if (local && baseSnap && !eq(local, baseSnap)) localStorage.setItem(UNSAVED_KEY, JSON.stringify({ base: baseSnap, local, ts: Date.now() }));
     } catch (e) { /* Speicher voll / gesperrt → ohne Sicherung weiter */ }
   }
+  const clearUnsaved = () => { try { localStorage.removeItem(UNSAVED_KEY); sessionStorage.removeItem(UNSAVED_KEY); } catch (e) {} };
+  function stashUnsaved() { rememberUnsaved(snapFn ? snapFn() : null); }
   async function restoreUnsaved() {
     let st = null;
-    try { st = JSON.parse(sessionStorage.getItem(UNSAVED_KEY) || 'null'); sessionStorage.removeItem(UNSAVED_KEY); } catch (e) { return; }
-    if (!st || !st.local || !baseSnap || Date.now() - (st.ts || 0) > 12 * 3600 * 1000) return;
+    try { st = JSON.parse(localStorage.getItem(UNSAVED_KEY) || sessionStorage.getItem(UNSAVED_KEY) || 'null'); clearUnsaved(); } catch (e) { return; }
+    if (!st || !st.local || !baseSnap || Date.now() - (st.ts || 0) > 3 * 24 * 3600 * 1000) return;
     const merged = merge3(st.base || baseSnap, st.local, baseSnap);
     if (eq(merged, baseSnap)) return;
     if (applyFn) applyFn(clone(merged), 'merge');
@@ -173,13 +185,13 @@ window.Cloud = (function () {
 
   const planPath = () => '/sites/' + siteId + '/drive/root:/' + MS_CONFIG.filePath + ':/content';
 
-  async function pull(initial) {
+  async function pull(initial, force) {
     await resolveSite();
     const r = await graph(planPath());
     if (r.status === 404) { etag = null; baseSnap = null; setStatus('angemeldet · noch keine Cloud-Daten', 'ok'); return null; }
     if (!r.ok) throw new Error('Laden fehlgeschlagen (' + r.status + ')');
     const newEtag = r.headers.get('ETag') || r.headers.get('etag');
-    if (!initial && baseSnap && newEtag && newEtag === etag) return null;   // nichts Neues am Server
+    if (!initial && !force && baseSnap && newEtag && newEtag === etag) return null;   // nichts Neues am Server
     const remote = await r.json();
     let toApply, hadLocal = false;
     if (initial || !baseSnap) { toApply = remote; }
@@ -200,12 +212,13 @@ window.Cloud = (function () {
     if (!r.ok) throw new Error('Speichern fehlgeschlagen (' + r.status + ')');
     const j = await r.json().catch(() => ({}));
     etag = j.eTag || j.cTag || etag; baseSnap = clone(snap);
+    clearUnsaved();
     setStatus('gespeichert ' + hhmm(), 'ok');
   }
 
   // Konflikt: aktuellen Serverstand holen, mit lokalen Änderungen zusammenführen, erneut speichern
   async function mergeAndRetry(tries) {
-    if (tries > 5) { setStatus('⚠ Speicher-Konflikt – bitte „↻ Laden"', 'warn'); return; }
+    if (tries > 5) throw new Error('Speicher-Konflikt – wird erneut versucht');
     const r = await graph(planPath());
     if (!r.ok) throw new Error('Laden fehlgeschlagen (' + r.status + ')');
     const newEtag = r.headers.get('ETag') || r.headers.get('etag');
@@ -219,11 +232,13 @@ window.Cloud = (function () {
     if (!pr.ok) throw new Error('Speichern fehlgeschlagen (' + pr.status + ')');
     const j = await pr.json().catch(() => ({}));
     etag = j.eTag || j.cTag || etag; baseSnap = clone(merged);
+    clearUnsaved();
     setStatus('zusammengeführt & gespeichert ' + hhmm(), 'ok');
   }
 
   // Live-Sync: regelmäßig + bei Fokus den Serverstand holen und mergen
-  async function safePull() { if (syncing || !msalAccount) return; syncing = true; try { await pull(false); } catch (e) { /* still weiter */ } finally { syncing = false; } }
+  let canSyncFn = () => true;
+  async function safePull() { if (syncing || !msalAccount || !canSyncFn()) return; syncing = true; try { await pull(false); } catch (e) { /* still weiter */ } finally { syncing = false; } }
   const onFocusSync = () => safePull();
   const onVisSync = () => { if (document.visibilityState === 'visible') safePull(); };
   function startSync() {
@@ -270,7 +285,8 @@ window.Cloud = (function () {
     account() { return msalAccount && (msalAccount.username || msalAccount.name); },
     onApply(fn) { applyFn = fn; },
     onStatus(fn) { statusFn = fn; },
-    onSnapshot(fn) { snapFn = fn; },   // liefert cloud.js den aktuellen lokalen Stand fürs Mergen
+    onSnapshot(fn) { snapFn = fn; },
+    onCanSync(fn) { canSyncFn = fn; },   // false, solange ein Dialog offen ist → kein Abgleich/Speichern in dieser Zeit   // liefert cloud.js den aktuellen lokalen Stand fürs Mergen
     merge3(base, local, remote, preferRemote) { return merge3(base, local, remote, preferRemote); },   // 3-Wege-Merge (auch für Tests)
 
     async init() {
@@ -314,19 +330,26 @@ window.Cloud = (function () {
     async reload() {
       if (!msalAccount || syncing) return;
       syncing = true;
-      try { await pull(true); } catch (e) { if (!e.relogin) setStatus('Fehler: ' + e.message, 'warn'); } finally { syncing = false; }
+      try { await pull(false, true); } catch (e) { if (!e.relogin) setStatus('Fehler: ' + e.message, 'warn'); } finally { syncing = false; }
     },
     scheduleSave(snap) {
       if (!msalAccount) return;               // ohne Login nur lokal speichern
       pendingSnap = snap;
+      rememberUnsaved(snap);
       clearTimeout(saveTimer);
       saveTimer = setTimeout(async () => {
+        if (!canSyncFn()) { saveTimer = setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(snapFn ? snapFn() : pendingSnap); }, 1500); return; }
         if (syncing) { saveTimer = setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(pendingSnap); }, 400); return; }
         syncing = true;
         // Den Stand von JETZT speichern, nicht den vom Klick: kam in den 1,5 s ein Live-Sync dazwischen, enthielte
         // der vorgemerkte Stand die gerade hereingeholten Änderungen der anderen nicht und überschriebe sie.
         try { setStatus('speichere…', 'sync'); await push(snapFn ? snapFn() : pendingSnap); }
-        catch (e) { if (!e.relogin) setStatus('Speicher-Fehler: ' + e.message, 'warn'); }
+        catch (e) {
+          if (!e.relogin) {
+            setStatus('Speicher-Fehler: ' + e.message + ' – neuer Versuch in 20 s', 'warn');
+            setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(snapFn ? snapFn() : pendingSnap); }, 20000);
+          }
+        }
         finally { syncing = false; }
       }, 1500);
     },
