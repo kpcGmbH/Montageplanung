@@ -69,7 +69,7 @@
   // hatten (per Live-Sync längst sichtbar), verschwand dabei wortlos, auch in der Cloud (gemeldet 09.10.2026:
   // „frei" bei zwei Monteuren weg, im Verlauf stand nur „Änderung rückgängig gemacht").
   const undoStack = [], redoStack = [], MAX_HIST = 80;
-  let histPrev = null, suppressHistory = false;
+  let histPrev = null, suppressHistory = false, batchDepth = 0;
   function updateUndoUI() {
     const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
     if (u) u.disabled = undoStack.length === 0;
@@ -148,7 +148,15 @@
     const g = PLAN.groups.find(x => x.name === 'Projekte'); if (!g) return;
     for (const row of g.rows) for (const bar of (row.bars || []).slice()) if (bar.start && bar.end) { splitStray(row, bar); fitBar(bar); }
   }
+  // Mehrteilige Aktionen (z. B. Zelle speichern = entfernen + neu zuordnen + Notiz) als EIN Speichern
+  // und EIN Rückgängig-Schritt; Zwischenschritte räumen nichts auf (kein Löschen gerade geleerter Fenster).
+  function historyBatch(fn) {
+    batchDepth++;
+    try { fn(); } finally { batchDepth--; }
+    save();
+  }
   function save() {
+    if (batchDepth > 0) return;
     pruneEmptyWeekBars();   // leere Woche-Fragmente entfernen
     fitWindows();           // kein Einsatz außerhalb seines Fensters
     ensureIds();   // neue Balken/Phasen bekommen stabile IDs vor dem Sync (fürs Zusammenführen)
@@ -596,12 +604,12 @@
   }
   const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows.filter(r => !r.archived) : []; };
   // Verschiebt einen Tages-Einsatz von (fromId, fromDate) auf (toId, toDate) und schreibt es in den Zeitplan zurück.
-  function weekReassign(fromId, fromDate, toId, toDate, projectNames) {
+  const rowLabels = (ids) => (ids || []).map(id => { const r = projRows().find(x => x.id === id); return r ? (r.site || r.label) : '?'; });
+  function weekReassign(fromId, fromDate, toId, toDate, projectIds) {
     if (fromId === toId && fromDate === toDate) return;
-    const names = projectNames || [], D = parse(fromDate);
+    const names = rowLabels(projectIds), D = parse(fromDate);
     for (const row of projRows()) {
-      const nm = row.site || row.label;
-      if (names.length && names.indexOf(nm) < 0) continue;
+      if ((projectIds || []).indexOf(row.id) < 0) continue;
       for (const bar of row.bars) for (const ph of phasesOf(bar)) {
         const here = assignedRanges(ph).some(r => r.id === fromId && parse(r.start) <= D && parse(r.end) >= D);
         if (!here) continue;
@@ -616,14 +624,14 @@
   }
   // Verschiebt den GANZEN Einsatz (Montagebalken + alle Phasen + Zuordnungen) um die Tagesdifferenz.
   // Grundlage für „Einsatz um einen Tag nach vorne/hinten" per Drag in der Woche → wirkt im Zeitplan.
-  function weekShiftEinsatz(pid, fromDate, toDate, projectNames) {
+  function weekShiftEinsatz(pid, fromDate, toDate, projectIds) {
     const delta = Math.round((parse(toDate) - parse(fromDate)) / MS_DAY);
     if (!delta) return;
-    const names = projectNames || [], D = parse(fromDate);
+    const D = parse(fromDate);
     const sh = (iso) => isoStr(addDays(parse(iso), delta));
     for (const row of projRows()) {
+      if ((projectIds || []).indexOf(row.id) < 0) continue;
       const nm = row.site || row.label;
-      if (names.length && names.indexOf(nm) < 0) continue;
       for (const bar of row.bars) {
         const phs = phasesOf(bar);
         const hit = phs.some(ph => assignedRanges(ph).some(r => r.id === pid && parse(r.start) <= D && parse(r.end) >= D));
@@ -652,12 +660,11 @@
       }
     }
   }
-  // Entfernt Person an genau einem Tag aus allen (genannten) Projekten.
-  function removePersonDay(pid, dayISO, projectNames) {
-    const names = projectNames || [];
+  // Entfernt Person an genau einem Tag aus den genannten Projekten (Zeilen-IDs). Leere Liste = nichts.
+  function removePersonDay(pid, dayISO, projectIds) {
+    if (!projectIds || !projectIds.length) return;
     for (const row of projRows()) {
-      const nm = row.site || row.label;
-      if (names.length && names.indexOf(nm) < 0) continue;
+      if (projectIds.indexOf(row.id) < 0) continue;
       for (const bar of row.bars) { for (const ph of phasesOf(bar)) removeFromPhase(ph, pid, dayISO); removeFromBl(bar, pid, dayISO); }
     }
     save();
@@ -1758,10 +1765,17 @@
     if (d && d.urlaub && !(d.projects || []).length) return false;
     return !!((d && d.projects.length) || (note && note.type !== 'buero'));
   }
+  // Hat die Person an dem Tag überhaupt etwas (Baustelle oder Termin, keine Abwesenheit)?
+  function carPresent(pid, iso, derived) {
+    const k = akey(pid, iso), d = derived[k], a = assignments[k];
+    const note = (a && a.type !== 'baustelle') ? a : null;
+    if (note && ABSENCE_TYPES.has(note.type)) return false;
+    return !!((d && d.projects.length && !(d.urlaub && !note)) || note);
+  }
   function effVeh(pid, iso, derived) {
     const x = (PLAN.cars || {})[akey(pid, iso)];
     if (x === 'none') return null;
-    if (x) return vehById(x);
+    if (x) return carPresent(pid, iso, derived) ? vehById(x) : null;   // alte Wahl an einem jetzt leeren Tag zählt nicht
     return carActive(pid, iso, derived) ? defaultVehOf(pid) : null;
   }
   // Belegung eines Tages: Fahrzeug-ID → Namen der Insassen
@@ -1783,10 +1797,12 @@
   }
   const vehLabel = (v) => v.name + (v.note ? ' (' + v.note + ')' : '');
   // Auswahl aus der Maske speichern: entspricht sie der Vorauswahl (Stammfahrzeug bzw. keines), bleibt kein Eintrag.
-  function setCar(pid, iso, val) {
+  function setCar(pid, iso, val, derived) {
     PLAN.cars = PLAN.cars || {};
     const k = akey(pid, iso), def = defaultVehOf(pid);
-    if (!val || val === (def ? def.id : 'none')) delete PLAN.cars[k]; else PLAN.cars[k] = val;
+    // Stammfahrzeug nur dann „ohne Eintrag", wenn es an dem Tag ohnehin gilt (Einsatztag); sonst explizit merken
+    const isDefault = def ? (val === def.id && carActive(pid, iso, derived || {})) : val === 'none';
+    if (!val || isDefault) delete PLAN.cars[k]; else PLAN.cars[k] = val;
   }
   // Manuelle Abwesenheit (frei / n.v.) im Wochenkalender? Dann ist die Person an dem Tag NICHT auf dem
   // geplanten Zeitplan-Einsatz → gibt den Phasen-Platz frei (offener Bedarf).
@@ -1870,16 +1886,16 @@
   function weekDerived() {
     const map = {};
     const get = (pid, ms) => { const k = akey(pid, isoStr(ms)); return (map[k] = map[k] || { projects: [], labels: [], addrs: [], ti: [], urlaub: false, booking: false, unconfirmed: false }); };
-    const eachWorkday = (s, e, cb) => {
-      for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
+    const eachWorkday = (s, e, cb, weekend) => {
+      for (let i = 0; i < 7; i++) { const ms = addDays(selMonday, i); const dow = new Date(ms).getUTCDay(); if (!weekend && (dow === 0 || dow === 6)) continue; if (parse(s) > ms || parse(e) < ms) continue; cb(ms); }
     };
     for (const m of PLAN.team) for (const bar of (m.bars || [])) {
       if (bar.cat !== 'vacation' && bar.cat !== 'booking') continue;
       eachWorkday(bar.start, bar.end, (ms) => { const c = get(m.id, ms); if (m.type === 'extern') c.booking = true; else c.urlaub = true; });
     }
-    const proj = PLAN.groups.find(g => g.name === 'Projekte');
-    if (proj) for (const row of proj.rows) {
-      const name = row.site || row.label;
+    // Archivierte Projekte zählen nirgends mit; Schlüssel ist die Zeilen-ID (Bereiche einer Baustelle sind verschieden)
+    for (const row of projRows()) {
+      const name = row.id;
       for (const bar of row.bars) {
         const shown = weekName(row, bar);
         const at = addrOf(row, bar), addrLine = at ? '📍 ' + shown + ': ' + at : '';
@@ -1899,7 +1915,7 @@
             // Übernachtung als Vorgabe, wenn die Person am Folgetag in derselben Phase weiterarbeitet
             // (Zuordnungen können taggenau zerstückelt sein → über alle Bereiche der Person prüfen)
             const nx = addDays(ms, 1);
-            if (ph.overnight && (ph.weekend || isWorkdayMs(nx)) && assignedRanges(ph).some(q => q.id === r.id && parse(q.start) <= nx && parse(q.end) >= nx)) c.nightDef = true; if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+            if (ph.overnight && (ph.weekend || isWorkdayMs(nx)) && assignedRanges(ph).some(q => q.id === r.id && parse(q.start) <= nx && parse(q.end) >= nx)) c.nightDef = true; if (isHalf(ph) && isoStr(ms) === ph.end) c.half = true; if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; }, !!ph.weekend);
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
@@ -1923,7 +1939,7 @@
           const need = +ph.count || 0; if (need <= 0) return;
           const ranges = assignedRanges(ph), days = {}; let anyOpen = false;
           for (let i = 0; i < 7; i++) {
-            const ms = wdays[i]; const dow = new Date(ms).getUTCDay(); if (dow === 0 || dow === 6) continue;
+            const ms = wdays[i]; const dow = new Date(ms).getUTCDay(); if (!ph.weekend && (dow === 0 || dow === 6)) continue;
             if (parse(ph.start) > ms || parse(ph.end) < ms) continue;   // Phase an dem Tag nicht aktiv
             const iso = isoStr(ms);
             // Zugeordnete an dem Tag, aber faktisch weg (überschrieben oder im Urlaub) zählen NICHT als besetzt
@@ -2003,7 +2019,7 @@
     const der = weekDerived();
     for (const m of cands) {
       const stt = der[akey(m.id, dISO)] || { projects: [], urlaub: false };
-      const busy = stt.urlaub ? 'Urlaub' : (stt.projects.length ? stt.projects.join(', ') : '');
+      const busy = stt.urlaub ? 'Urlaub' : ((stt.labels || []).length ? stt.labels.join(', ') : '');
       const b = el('button', 'need-menu-item' + (busy ? ' busy' : ''));
       b.appendChild(el('span', null, m.name + (m.type === 'extern' ? ' (ext)' : '')));
       if (busy) b.appendChild(el('span', 'need-menu-busy', busy));
@@ -2046,24 +2062,18 @@
     const der = weekDerived(), days = [];
     for (let i = 0; i < 5; i++) {
       const ms = addDays(selMonday, i), key = akey(p.id, isoStr(ms));
-      const d = der[key] || { projects: [] }, projects = [];
-      for (const name of d.projects) { const dp = derivedProjectOf(p.id, ms, [name]); if (!dp.rowId) continue;
-        const e = dp.bl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(p) };
-        // Kleinprojekt: Bezeichnung der Montage mitnehmen, damit die Zielperson im selben Fenster landet
-        const krow = projRows().find(r => r.id === dp.rowId), kb = (krow && isKleinRow(krow)) ? barOfPersonDay(krow, p.id, ms) : null;
-        if (kb) { e.label = kb.label || ''; for (const k of ADDR_KEYS) e[k] = kb[k] || ''; }
-        projects.push(e);
-      }
+      const projects = dayEntries(p, ms, p.kind === 'bauleiter');
       const a = assignments[key];
       days.push({ projects, note: (a && a.type !== 'baustelle') ? { text: a.text, type: a.type } : null });
     }
-    clip = { kind: 'personweek', fromName: p.name, days };
+    clip = { kind: 'personweek', fromName: p.name, fromKind: p.kind, days };
     toast('Woche von ' + p.name + ' kopiert – Rechtsklick auf Zielperson → „Woche einfügen"');
   }
   function pastePersonWeek(p) {
     if (!clip || clip.kind !== 'personweek') return;
+    if ((clip.fromKind === 'bauleiter') !== (p.kind === 'bauleiter')) { toast('Woche einer Bauleitung lässt sich nur auf Bauleiter übertragen, die eines Monteurs nur auf Monteure.'); return; }
     const der = weekDerived();
-    suppressHistory = true;
+    historyBatch(() => {
     for (let i = 0; i < 5; i++) {
       const ms = addDays(selMonday, i), dISO = isoStr(ms), key = akey(p.id, dISO);
       const targetProjects = (der[key] || { projects: [] }).projects.slice();
@@ -2073,9 +2083,9 @@
       for (const e of day.projects) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (e.bl) assignBauleitung(p.id, ms, row, e); else assignWeekProject(p.id, ms, row, e.gewerk, e); }
       if (day.note) assignments[key] = { text: day.note.text, type: day.note.type, auto: false };
     }
-    suppressHistory = false;
     logChange(`Woche von ${clip.fromName} auf ${p.name} übertragen`, 'woche');
-    save(); renderWeek();
+    });
+    renderWeek();
   }
 
   // Eingeklappte Bereiche der Woche (pro Browser gemerkt)
@@ -2325,6 +2335,7 @@
               save(); renderWeek();
             }
           }
+          else if (data.move && p.kind === 'bauleiter') { toast('Monteur-Einsätze lassen sich nicht auf die Bauleitung ziehen.'); }
           else if (data.move) {
             // gleiche Person, anderer Tag = ganzen Einsatz verschieben; andere Person = Übergabe dieses Tages
             if (data.move.fromId === p.id) weekShiftEinsatz(p.id, data.move.fromDate, dISO, data.move.projects);
@@ -2371,7 +2382,7 @@
         const text = [...e.childNodes].filter(x => x.nodeType === 3).map(x => x.textContent).join('').trim();
         const ex = e.querySelector('.wk-extra'), car = e.querySelector('.wk-car');
         cells.push({ text, extra: ex ? ex.textContent : '', car: car ? car.textContent : '', carOver: !!(car && car.classList.contains('over')), night: !!e.querySelector('.wk-night'),
-          bg: unconf ? '#fdecd9' : cs.backgroundColor, fg: unconf ? '#6b3e00' : cs.color, unconf, bold: +cs.fontWeight >= 600 });
+          bg: unconf ? '#fdecd9' : (e.classList.contains('wk-split') ? '#e6f0fb' : cs.backgroundColor), fg: unconf ? '#6b3e00' : cs.color, unconf, bold: +cs.fontWeight >= 600 });
       }
       rows.push({ name: n.querySelector('.wk-person-name').textContent, extern: n.classList.contains('extern'),
         tags: [...n.querySelectorAll('.trade-tag')].map(t => ({ t: t.textContent, c: t.style.background || '#888' })), cells });
@@ -2654,7 +2665,12 @@
     }
     return bar;
   }
-  const weekEntryBar = (row, ms, entry, forBl) => (entry && isKleinRow(row)) ? kleinBarFor(row, ms, entry) : weekBarFor(row, ms, forBl);
+  const weekEntryBar = (row, ms, entry, forBl) => {
+    if (entry && isKleinRow(row)) return kleinBarFor(row, ms, entry);
+    const b = entry && entry.bar;
+    if (b && row.bars.indexOf(b) >= 0 && parse(b.start) <= ms && parse(b.end) >= ms) return b;
+    return weekBarFor(row, ms, forBl);
+  };
   // Person an einem Tag einem Projekt/Gewerk zuordnen (schreibt in den Zeitplan)
   function assignWeekProject(pid, ms, row, gewerk, entry) {
     const dISO = isoStr(ms);
@@ -2663,14 +2679,13 @@
     if (bar.crew) { if ((bar.crew.assigned || []).length || bar.crew.trade) phasesOf(bar); else delete bar.crew; }
     if (!bar.phases) bar.phases = [];
     const weekendDay = [0, 6].includes(new Date(ms).getUTCDay());
-    let ph = bar.phases.find(p => (p.trade || 'edelstahl') === gewerk);
-    if (!ph) { ph = { trade: gewerk, start: bar.start, end: bar.end, days: 1, weekend: weekendDay, count: 1, assigned: [] }; bar.phases.push(ph); }
-    else {
-      // Phasenfenster an das (evtl. erweiterte) Balkenfenster anpassen und days konsistent halten
-      if (parse(bar.start) < parse(ph.start)) ph.start = bar.start;
-      if (parse(bar.end) > parse(ph.end)) ph.end = bar.end;
-      if (weekendDay) ph.weekend = true;
-    }
+    const sameTrade = bar.phases.filter(p => (p.trade || 'edelstahl') === gewerk && (!weekendDay || p.weekend));
+    const workBetween = (aMs, bMs, wk) => { let n = 0; for (let x = addDays(aMs, 1); x < bMs; x = addDays(x, 1)) if (wk || isWorkdayMs(x)) n++; return n; };
+    // passende Phase: deckt den Tag ab, sonst eine direkt angrenzende (keine Arbeitstage dazwischen)
+    let ph = sameTrade.find(p => parse(p.start) <= ms && parse(p.end) >= ms)
+      || sameTrade.find(p => (ms > parse(p.end) && !workBetween(parse(p.end), ms, p.weekend)) || (ms < parse(p.start) && !workBetween(ms, parse(p.start), p.weekend)));
+    if (!ph) { ph = { trade: gewerk, start: dISO, end: dISO, days: 1, weekend: weekendDay, count: 1, assigned: [] }; bar.phases.push(ph); }
+    else { if (ms < parse(ph.start)) ph.start = dISO; if (ms > parse(ph.end)) ph.end = dISO; }
     const span = daysCount(ph.start, ph.end, !!ph.weekend);
     if (!(isHalf(ph) && Math.ceil(+ph.days) === span)) ph.days = span;   // halben Tag behalten, solange die Spanne passt
     addToPhase(ph, pid, dISO);
@@ -2698,16 +2713,17 @@
     const cur = wText.value.trim();
     if (!cur || CELL_TYPE_TEXT_SET.has(cur)) wText.value = CELL_TYPE_TEXT[wType.value] || '';
   });
-  // Zu einer abgeleiteten Projekt-Zelle das Zeitplan-Projekt (Zeile) + Gewerk der Person an dem Tag finden
-  function derivedProjectOf(pid, ms, projectNames) {
-    if (!projectNames || !projectNames.length) return { rowId: '', gewerk: '' };
-    const prow = projRows().find(r => (r.site || r.label) === projectNames[0]);
-    if (!prow) return { rowId: '', gewerk: '' };
-    for (const b of prow.bars) for (const ph of (b.phases || [])) {
-      if (assignedRanges(ph).some(rg => rg.id === pid && parse(rg.start) <= ms && parse(rg.end) >= ms)) return { rowId: prow.id, gewerk: ph.trade || '' };
+  // Alle Einsätze einer Person an einem Tag – je Montagefenster und Gewerk ein Eintrag (mit Verweis aufs Fenster),
+  // damit Bereiche einer Baustelle, mehrere Gewerke und Kleinprojekte beim Speichern erhalten bleiben.
+  function dayEntries(person, ms, isBl) {
+    const out = [], on = (r) => r.id === person.id && parse(r.start) <= ms && parse(r.end) >= ms;
+    for (const row of projRows()) for (const b of row.bars) {
+      const extra = isKleinRow(row) ? { label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' } : {};
+      if (isBl) { if (blRanges(b).some(on)) out.push(Object.assign({ rowId: row.id, bl: true, bar: b }, extra)); continue; }
+      for (const ph of (b.phases || [])) if (assignedRanges(ph).some(on))
+        out.push(Object.assign({ rowId: row.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b }, extra));
     }
-    for (const b of prow.bars) if (blRanges(b).some(rg => rg.id === pid && parse(rg.start) <= ms && parse(rg.end) >= ms)) return { rowId: prow.id, gewerk: '', bl: true };
-    return { rowId: prow.id, gewerk: '' };
+    return out;
   }
   function openCellEditor(key, person, ms) {
     curCell = key; curCellPerson = person; curCellIsBl = person.kind === 'bauleiter';
@@ -2718,22 +2734,7 @@
     document.getElementById('wTitle').textContent = `${person.name} · ${WDAYS[(new Date(ms).getUTCDay() + 6) % 7]} ${fmt(ms).slice(0, 6)}`;
     // Baustellen vorbelegen: alle abgeleiteten Projekte des Tages (mehrere möglich), je mit Gewerk – IMMER,
     // damit ein geplanter Einsatz auch dann bearbeitbar ist, wenn zusätzlich eine Notiz auf dem Tag liegt.
-    wProjectDraft = [];
-    for (const name of der.projects) {
-      const dp = derivedProjectOf(person.id, ms, [name]);
-      const krow = dp.rowId ? projRows().find(r => r.id === dp.rowId) : null;
-      if (krow && isKleinRow(krow)) {
-        // Sammelzeile: je Montage (Fenster), in der die Person an dem Tag steht, ein eigener Eintrag mit Bezeichnung
-        const on = (r) => r.id === person.id && parse(r.start) <= ms && parse(r.end) >= ms;
-        for (const b of krow.bars) {
-          if (curCellIsBl) { if (blRanges(b).some(on)) wProjectDraft.push({ rowId: krow.id, bl: true, bar: b, label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' }); continue; }
-          for (const ph of (b.phases || [])) if (assignedRanges(ph).some(on))
-            wProjectDraft.push({ rowId: krow.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b, label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' });
-        }
-        if (wProjectDraft.some(e => e.rowId === krow.id)) continue;
-      }
-      if (dp.rowId) wProjectDraft.push(curCellIsBl ? { rowId: dp.rowId, bl: true } : { rowId: dp.rowId, gewerk: (dp.gewerk && TRADES()[dp.gewerk]) ? dp.gewerk : firstTradeOf(person) });
-    }
+    wProjectDraft = dayEntries(person, ms, curCellIsBl);
     renderProjRows();
     wType.value = note ? note.type : (curCellIsBl ? 'bauleitung' : CELL_TYPE_DEFAULT);   // Bauleiter: Standardtyp Bauleitung (nicht Montage)
     // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
@@ -2748,7 +2749,10 @@
       addOpt(v.id, vehLabel(v) + ' · ' + v.seats + ' Sitze' + (others.length ? ' · mit ' + others.join(', ') : ' · frei'));
     }
     // Vorauswahl: die gespeicherte Wahl, sonst das Stammfahrzeug. Gespeichert wird nur, was davon abweicht.
-    wCar.value = (PLAN.cars || {})[key] || (def ? def.id : 'none');
+    const noteNow = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
+    const defApplies = def && (carActive(person.id, iso, allDer) || (!der.projects.length && !noteNow));   // leere Zelle → Stammfahrzeug vorschlagen
+    wCar.value = (PLAN.cars || {})[key] || (defApplies ? def.id : 'none');
+    curCellCtx.carInit = wCar.value;
     document.getElementById('w-car-wrap').style.display = vehicles().length ? '' : 'none';
     document.getElementById('w-night').checked = effNight(key, allDer[key]);
     const blank = !note && !der.projects.length && !der.urlaub;
@@ -2771,8 +2775,19 @@
     }
     return out;
   }
+  // Neue Kleinprojekt-Einträge brauchen eine Bezeichnung – sonst landete die Person im Fenster eines anderen Kunden
+  function kleinLabelMissing() {
+    const miss = wProjectDraft.some(e => { const r = projRows().find(x => x.id === e.rowId); return r && isKleinRow(r) && !e.bar && !(e.label || '').trim(); });
+    if (miss) alert('Bitte für das Kleinprojekt eine Bezeichnung eintragen (z. B. Kunde / Ort).');
+    return miss;
+  }
   document.getElementById('w-save').onclick = () => {
     if (!curCell || !curCellCtx) return;
+    if (kleinLabelMissing()) return;
+    historyBatch(saveCellNow);
+    renderWeek(); closeCellEditor();
+  };
+  function saveCellNow() {
     const who = cellPersonName(), day = fmt(parse(curCellCtx.dISO));
     const parts = [];
     // 1) Baustellen des Tages neu setzen (leer = alle für den Tag entfernen). Bauleiter → Bauleitung, sonst Einsatz.
@@ -2780,7 +2795,7 @@
     removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
     for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, parse(curCellCtx.dISO), row, e); else assignWeekProject(curCellCtx.pid, parse(curCellCtx.dISO), row, e.gewerk, e); }
     for (const t of renamed) parts.push(t);
-    if (wProjectDraft.length) parts.push((curCellIsBl ? 'Bauleitung: ' : 'Einsatz: ') + wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? ((isKleinRow(r) && (e.label || '').trim()) || r.site || r.label) : '?'; }).join(', '));
+    if (wProjectDraft.length) parts.push((curCellIsBl ? 'Bauleitung: ' : 'Einsatz: ') + [...new Set(wProjectDraft.map(e => { const r = projRows().find(x => x.id === e.rowId); return r ? ((isKleinRow(r) && (e.label || '').trim()) || (r.site ? r.site + ' · ' + r.label : r.label)) + (e.gewerk && TRADES()[e.gewerk] ? ' (' + TRADES()[e.gewerk].label + ')' : '') : '?'; }))].join(', '));
     else if (curCellCtx.projects.length) parts.push(curCellIsBl ? 'Bauleitung entfernt' : 'Einsatz entfernt');
     // 2) Manueller Termin/Notiz – UNABHÄNGIG vom Einsatz (beide können nebeneinander stehen).
     //    Reinen Auto-Standardtext (z. B. „Montage") NICHT als Notiz neben einer Baustelle speichern.
@@ -2788,9 +2803,9 @@
     if (wProjectDraft.length && CELL_TYPE_TEXT_SET.has(text)) text = '';
     if (!text) { if (assignments[curCell] && assignments[curCell].type !== 'baustelle') parts.push('Notiz entfernt'); delete assignments[curCell]; }
     else { assignments[curCell] = { text, type: wType.value, auto: false }; parts.push('Termin: „' + text + '"'); }
-    // 3) Fahrzeug des Tages
-    const carOld = (PLAN.cars || {})[curCell] || '';
-    setCar(curCellCtx.pid, curCellCtx.dISO, document.getElementById('w-car').value);
+    // 3) Fahrzeug des Tages – nur wenn die Auswahl aktiv geändert wurde
+    const carOld = (PLAN.cars || {})[curCell] || '', carVal = document.getElementById('w-car').value;
+    if (carVal !== curCellCtx.carInit) setCar(curCellCtx.pid, curCellCtx.dISO, carVal, weekDerived());
     const carNew = (PLAN.cars || {})[curCell] || '';
     // 4) Übernachtung nach diesem Tag (Vorgabe kommt aus der Phase; gespeichert wird nur die Abweichung)
     const nOld = effNight(curCell, weekDerived()[curCell]);   // nach dem Neusetzen der Baustellen
@@ -2799,15 +2814,16 @@
     if (nNew !== nOld) parts.push(nNew ? 'Übernachtung' : 'keine Übernachtung');
     if (carNew !== carOld) parts.push('Fahrzeug: ' + (carNew === 'none' ? 'keines' : carNew ? (vehById(carNew) || {}).name : 'Stammfahrzeug'));
     logChange(`${who} am ${day} – ${parts.length ? parts.join(' · ') : 'keine Änderung'}`, 'woche');
-    save(); renderWeek(); closeCellEditor();
-  };
+  }
   document.getElementById('w-delete').onclick = () => {
     const who = cellPersonName(), day = curCellCtx ? fmt(parse(curCellCtx.dISO)) : '';
-    if (curCell) { delete assignments[curCell]; if (PLAN.cars) delete PLAN.cars[curCell]; if (PLAN.nights) delete PLAN.nights[curCell]; }
-    // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
-    if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
-    logChange(`Eintrag gelöscht (${who}, ${day})`, 'woche');
-    save(); renderWeek(); closeCellEditor();
+    historyBatch(() => {
+      if (curCell) { delete assignments[curCell]; if (PLAN.cars) delete PLAN.cars[curCell]; if (PLAN.nights) delete PLAN.nights[curCell]; }
+      // Zeitplan-Einsatz dieses Tages ebenfalls entfernen (schreibt in die Phasen zurück)
+      if (curCellCtx && curCellCtx.projects.length) removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
+      logChange(`Eintrag gelöscht (${who}, ${day})`, 'woche');
+    });
+    renderWeek(); closeCellEditor();
   };
   // Eintrag auf alle Werktage (Mo–Fr) dieser Person übertragen – schnelles Kopieren, z. B. für Bauleiter
   document.getElementById('w-week').onclick = () => {
@@ -2815,7 +2831,12 @@
     let text = wText.value.trim();
     if (wProjectDraft.length && CELL_TYPE_TEXT_SET.has(text)) text = '';   // Auto-Standardtext nicht mitschreiben
     if (!wProjectDraft.length && !text) { alert('Bitte zuerst einen Text eingeben oder ein Projekt wählen, das auf die ganze Woche übertragen werden soll.'); return; }
+    if (kleinLabelMissing()) return;
+    const carVal = document.getElementById('w-car').value, carChanged = carVal !== curCellCtx.carInit;
+    historyBatch(() => {
     renameKleinBars();
+    // heutiger Tag: in der Maske entfernte Baustellen auch wirklich entfernen
+    removePersonDay(curCellCtx.pid, curCellCtx.dISO, curCellCtx.projects);
     const nightDays = [];
     for (let i = 0; i < 5; i++) {
       const ms = addDays(selMonday, i);
@@ -2823,15 +2844,19 @@
       for (const e of wProjectDraft) { const row = projRows().find(r => r.id === e.rowId); if (!row) continue; if (curCellIsBl) assignBauleitung(curCellCtx.pid, ms, row, e); else assignWeekProject(curCellCtx.pid, ms, row, e.gewerk, e); }
       // Manuellen Termin/Notiz zusätzlich auf jeden Werktag übertragen
       if (text) assignments[akey(curCellCtx.pid, isoStr(ms))] = { text, type: wType.value, auto: false };
-      setCar(curCellCtx.pid, isoStr(ms), document.getElementById('w-car').value);
       nightDays.push(i);
     }
-    // Übernachtung: Nächte Mo–Do wie angehakt, Freitag nie (Heimfahrt)
+    // Übernachtung: Nächte Mo–Do wie angehakt, Freitag nie (Heimfahrt); Fahrzeug nur, wenn aktiv geändert
     const derW = weekDerived(), nOn = document.getElementById('w-night').checked;
-    for (const i of nightDays) { const k = akey(curCellCtx.pid, isoStr(addDays(selMonday, i))); setNight(k, i < 4 && nOn, derW[k]); }
+    for (const i of nightDays) {
+      const iso = isoStr(addDays(selMonday, i)), k = akey(curCellCtx.pid, iso);
+      setNight(k, i < 4 && nOn, derW[k]);
+      if (carChanged) setCar(curCellCtx.pid, iso, carVal, derW);
+    }
     const who = cellPersonName();
     logChange(`${who}: auf ganze Woche übertragen${wProjectDraft.length ? ' · Einsatz' : ''}${text ? ' · Termin „' + text + '"' : ''}`, 'woche');
-    save(); renderWeek(); closeCellEditor();
+    });
+    renderWeek(); closeCellEditor();
   };
   // Zelle kopieren: aktuellen Editor-Inhalt (Baustellen + Notiz) in die Zwischenablage
   document.getElementById('w-copy').onclick = () => {
@@ -2841,7 +2866,7 @@
       kind: 'cell',
       projects: wProjectDraft.map(e => { const c = { rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }; for (const k of ADDR_KEYS) if (k in e) c[k] = e[k]; return c; }),
       note: text ? { text, type: wType.value } : null,
-      car: document.getElementById('w-car').value,
+      car: document.getElementById('w-car').value !== curCellCtx.carInit ? document.getElementById('w-car').value : null,
       night: document.getElementById('w-night').checked,
     };
     toast('Eintrag kopiert – Zielzelle öffnen und „Einfügen"');
