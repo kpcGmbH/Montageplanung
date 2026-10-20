@@ -346,7 +346,8 @@ for (const k in EINSATZ) {
   lab.querySelector("input").addEventListener("change", (e)=>{
     // Anschlussarbeiten gewählt → passende Tätigkeit im Leistungsumfang gleich mit anhaken
     const tk = EINSATZ[k].taet, c = tk && document.querySelector(`[data-taet="${tk}"]`);
-    if (c && e.target.checked && !c.checked){ c.checked = true; syncPanels(); }
+    if (c && e.target.checked && !c.checked){ c.checked = true; c.dataset.auto = '1'; syncPanels(); }
+    else if (c && !e.target.checked && c.dataset.auto === '1' && !taetCheckedItems(TAETIGKEITEN.find(x=>x.key===tk)).length){ c.checked = false; delete c.dataset.auto; syncPanels(); }
     applyArt(false);
   });
   $("einsatzart").appendChild(lab);
@@ -494,6 +495,12 @@ bindContact("bl_select","bl_name","bl_tel","bl_mail");
 })();
 
 // --- apply Einsatzart defaults / visibility (Mehrfachauswahl) ---
+const ART_TEXT_IDS = ['auftrag','zusatz','dokumente','material','anlagen'];
+let lastArtTexts = {};
+function genArtTexts(arten){
+  const cat = (key, onlyNonMontage) => uniq([].concat(...arten.filter(a=>!onlyNonMontage||!EINSATZ[a].montage).map(a=>EINSATZ[a][key])));
+  return { auftrag: arten.map(a=>EINSATZ[a].auftrag).join("\n"), zusatz: cat("zusatz", true).join("\n"), dokumente: cat("dokumente").join("\n"), material: cat("material").join("\n"), anlagen: cat("anlagen").join("\n") };
+}
 function applyArt(force){
   $("einsatzart").classList.remove("missing"); $("msg").classList.remove("show");
   const arten = selectedArten();
@@ -507,12 +514,10 @@ function applyArt(force){
   $("zusatz-wrap").style.display = anyNonMontage ? "" : "none";
   $("geraete-section").style.display = anyNonMontage ? "" : "none";
   $("montage-block").style.display = anyMontage ? "" : "none";
-  const cat = (key, onlyNonMontage) => uniq([].concat(...arten.filter(a=>!onlyNonMontage||!EINSATZ[a].montage).map(a=>EINSATZ[a][key])));
-  $("auftrag").value = arten.map(a=>EINSATZ[a].auftrag).join("\n");
-  $("zusatz").value = cat("zusatz", true).join("\n");
-  $("dokumente").value = cat("dokumente").join("\n");
-  $("material").value = cat("material").join("\n");
-  $("anlagen").value = cat("anlagen").join("\n");
+  // Standardtexte der gewählten Einsatzarten – von Hand geänderte Felder bleiben stehen
+  const gen = genArtTexts(arten);
+  ART_TEXT_IDS.forEach(id=>{ const el=$(id); const cur = el.value; if (force || cur.trim() === '' || cur === (lastArtTexts[id] || '')) el.value = gen[id]; });
+  lastArtTexts = gen;
   if (force) $("rueckmeldung").value = RUECKMELDUNG.join("\n");
   render();
 }
@@ -582,12 +587,11 @@ function buildText(){
     if (taets.length){
       sec("Geplante Tätigkeiten / Leistungsumfang");
       taets.forEach(t=>{
+        const items = t.freitext ? (($("rest_text") ? $("rest_text").value : "").split("\n").map(x=>x.trim()).filter(Boolean))
+          : taetCheckedItems(t).concat(taetSonst(t.key) ? [taetSonst(t.key)] : []);
+        if (!items.length) { L.push("- " + t.label); return; }   // ohne Details: als Listenpunkt statt leerer Überschrift
         L.push(t.label + ":");
-        if (t.freitext){ const rt=$("rest_text") ? $("rest_text").value.trim() : ""; if(rt) rt.split("\n").map(x=>x.trim()).filter(Boolean).forEach(x=>L.push("- "+x)); }
-        else {
-          taetCheckedItems(t).forEach(it=>L.push("- "+it));
-          const so=taetSonst(t.key); if(so) L.push("- "+so);
-        }
+        items.forEach(it=>L.push("- "+it));
       });
     }
   }
@@ -664,7 +668,7 @@ const SP_LINK = "https://kpcfulda.sharepoint.com/:f:/s/Projekte2021/IgDDGw6T8PBw
 const EMBEDDED = !!(window.parent && window.parent !== window);   // in die Montageplanung-App eingebettet?
 function render(){
   $("preview").textContent = buildText() + "\n\n\n" + buildIntern();
-  if (ready && !EMBEDDED){ try { localStorage.setItem(LS_KEY, JSON.stringify(collectState())); } catch(e){} }
+  if (ready && !EMBEDDED && !window.__DRAFT__){ try { localStorage.setItem(LS_KEY, JSON.stringify(collectState())); } catch(e){} }   // Entwurfsdateien nicht in die allgemeine Autospeicherung
 }
 // Vorbefüllung aus einem Zeitplan-Projekt (von der App per postMessage geliefert)
 function applyPrefill(pf){
@@ -723,6 +727,7 @@ function collectState(){
 function syncPanels(){
   TAETIGKEITEN.forEach(t=>{ const c=document.querySelector(`[data-taet="${t.key}"]`); const d=document.getElementById("detail-"+t.key); if(c&&d) d.style.display=c.checked?"":"none"; });
   Object.keys(GERAETE_SUB).forEach(i=>{ const c=document.querySelector(`[data-gk="${i}"]`); const s=document.querySelector(`[data-gks="${i}"]`); if(c&&s) s.closest(".gsub").style.display=c.checked?"":"none"; });
+  Object.keys(GERAETE_HINWEIS).forEach(i=>{ const c=document.querySelector(`[data-gk="${i}"]`); const h=c && c.closest("label") && c.closest("label").parentNode.querySelector(".gsub.hint"); if(c&&h) h.style.display=c.checked?"":"none"; });
 }
 function applyState(st){
   if (!st) return;
@@ -737,6 +742,7 @@ function applyState(st){
   });
   // 3. abhängige Panels nachziehen
   syncPanels();
+  lastArtTexts = genArtTexts(selectedArten());
   clearMissing();
   render();
 }
@@ -840,7 +846,7 @@ function loadDraftFile(file){
 function resetForm(){
   if (!confirm("Aktuelle Eingaben verwerfen und Formular leeren?")) return;
   if (EMBEDDED){ toParent({ type:'ti-reset', key: currentKey }); return; }
-  try { localStorage.removeItem(LS_KEY); } catch(e){}
+  try { if (window.__DRAFT__) sessionStorage.setItem('ti_skip_draft', '1'); else localStorage.removeItem(LS_KEY); } catch(e){}
   location.reload();
 }
 
@@ -1103,7 +1109,7 @@ if (EMBEDDED) {
   try {
     const hashState = readHashState();
     if (hashState) { applyState(hashState); history.replaceState(null, document.title, location.pathname + location.search); }
-    else if (window.__DRAFT__) { applyState(window.__DRAFT__); }
+    else if (window.__DRAFT__ && sessionStorage.getItem('ti_skip_draft') !== '1') { applyState(window.__DRAFT__); }
     else { const saved = localStorage.getItem(LS_KEY); if (saved) applyState(JSON.parse(saved)); }
   } catch(e){}
   if (location.protocol === "file:") showFileBanner();

@@ -25,7 +25,7 @@
   }
 
   const startMs = parse(PLAN.rangeStart);
-  const endMs = parse(PLAN.rangeEnd);
+  const endMs = Math.max(parse(PLAN.rangeEnd), addDays(todayMs(), 548));   // Zeitraum wächst mit (sonst Einsätze ab Ende auf den letzten Tag gequetscht)
   const totalDays = dayIndex(endMs, startMs) + 1;
   const internCount = () => PLAN.team.filter(m => m.type === 'intern').length;
   const externCount = () => PLAN.team.filter(m => m.type === 'extern').length;
@@ -157,6 +157,7 @@
   }
   function save() {
     if (batchDepth > 0) return;
+    if ((PLAN.changelog || []).length > 500) { PLAN.changelog.sort((a, b) => a.ts - b.ts); PLAN.changelog.splice(0, PLAN.changelog.length - 500); }
     pruneEmptyWeekBars();   // leere Woche-Fragmente entfernen
     fitWindows();           // kein Einsatz außerhalb seines Fensters
     ensureIds();   // neue Balken/Phasen bekommen stabile IDs vor dem Sync (fürs Zusammenführen)
@@ -332,7 +333,8 @@
     const g = PLAN.groups.find(x => x.name === 'Ressourcen / Monteure');
     if (!g) return;
     const keep = /steinacker|schulung|nicht zugeordnet/i;
-    const generic = g.rows.filter(r => !keep.test(r.label || ''));
+    const isLegacy = (r) => /^r\d+$/.test(r.id || '');   // nur alte Import-Zeilen; selbst angelegte (res…) bleiben unangetastet
+    const generic = g.rows.filter(r => isLegacy(r) && !keep.test(r.label || ''));
     if (!generic.length) return;
     const strip = (b, extern) => Object.assign({ start: b.start, end: b.end, label: b.label || '', cat: extern ? 'booking' : 'vacation' }, b.size ? { size: b.size } : {});
     const matchMember = (lbl) => {
@@ -346,7 +348,7 @@
       if (m) { (m.bars = m.bars || []).push(strip(bar, m.type === 'extern')); }
       else leftover.push(strip(bar, false));
     }
-    g.rows = g.rows.filter(r => keep.test(r.label || ''));
+    g.rows = g.rows.filter(r => !(isLegacy(r) && !keep.test(r.label || '')));
     if (leftover.length) g.rows.push({ id: 'res-leftover', label: 'Urlaub (nicht zugeordnet)', capRole: 'monteur', bars: leftover });
   }
 
@@ -619,6 +621,20 @@
     if (!covered) ph.assigned.push({ id, start: dayISO, end: dayISO });
     // count (geplante Truppstärke) bleibt unverändert – ein Tages-Handoff erhöht den Bedarf nicht
   }
+  // Gelöschte Monteure/Bauleiter überall austragen – sonst zählen sie weiter als Besetzung und tauchen als ID auf
+  function purgePerson(id) {
+    let n = 0;
+    for (const g of PLAN.groups) for (const r of g.rows) for (const bar of (r.bars || [])) {
+      for (const ph of (bar.phases || [])) { const before = (ph.assigned || []).length; ph.assigned = (ph.assigned || []).filter(a => idOf(a) !== id); n += before - ph.assigned.length; }
+      if (bar.bl) { const before = bar.bl.length; bar.bl = bar.bl.filter(a => idOf(a) !== id); n += before - bar.bl.length; if (!bar.bl.length) delete bar.bl; }
+      if (bar.crew && bar.crew.assigned) bar.crew.assigned = bar.crew.assigned.filter(a => idOf(a) !== id);
+    }
+    const pre = id + '|';
+    for (const k of Object.keys(assignments)) if (k.startsWith(pre)) delete assignments[k];
+    for (const k of Object.keys(PLAN.cars || {})) if (k.startsWith(pre)) delete PLAN.cars[k];
+    for (const k of Object.keys(PLAN.nights || {})) if (k.startsWith(pre)) delete PLAN.nights[k];
+    return n;
+  }
   const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows.filter(r => !r.archived) : []; };
   // Verschiebt einen Tages-Einsatz von (fromId, fromDate) auf (toId, toDate) und schreibt es in den Zeitplan zurück.
   const rowLabels = (ids) => (ids || []).map(id => { const r = projRows().find(x => x.id === id); return r ? (r.site || r.label) : '?'; });
@@ -739,8 +755,8 @@
       for (let d = parse(ph.start); d <= parse(ph.end); d = addDays(d, 1)) {
         const dow = new Date(d).getUTCDay();
         let open = false;
-        if (dow !== 0 && dow !== 6) {
-          const have = sumPersons(new Set(ranges.filter(r => parse(r.start) <= d && parse(r.end) >= d).map(r => r.id)));
+        if (ph.weekend || (dow !== 0 && dow !== 6)) {
+          const have = sumPersons(new Set(ranges.filter(r => parse(r.start) <= d && parse(r.end) >= d).map(r => r.id).filter(id => !unavailable(id, d))));
           open = have < need;
         }
         if (open) { const iso = isoStr(d); if (!cur) cur = { start: iso, end: iso }; else cur.end = iso; }
@@ -851,7 +867,12 @@
         del.onclick = (e) => {
           e.stopPropagation();
           if (confirm(`„${row.label}" wirklich löschen?`)) {
-            group.rows.splice(group.rows.indexOf(row), 1); save(); render();
+            historyBatch(() => {
+              group.rows.splice(group.rows.indexOf(row), 1);
+              if (group.name === 'Bauleiter') purgePerson(row.id);
+              logChange(`${group.name === 'Projekte' ? 'Projekt' : 'Zeile'} „${row.site ? row.site + ' · ' : ''}${row.label}" gelöscht`, 'zeitplan');
+            });
+            render();
           }
         };
         label.appendChild(del);
@@ -1371,6 +1392,7 @@
   };
   document.getElementById('f-delete').onclick = () => {
     if (!current) return;
+    if (!current.isNew && !confirm(`Termin „${current.bar.label || '(ohne Bezeichnung)'}" mit allen Phasen, Monteuren und der Bauleitung löschen?`)) return;
     const rowNm = current.row.site || current.row.label, barNm = current.bar.label || '(ohne Bezeichnung)';
     const i = current.row.bars.indexOf(current.bar);
     if (i >= 0) current.row.bars.splice(i, 1);
@@ -1491,8 +1513,13 @@
   document.getElementById('r-delete').onclick = () => {
     if (!curResource) return;
     if (!confirm(`„${curResource.label}" wirklich löschen?`)) return;
-    for (const g of PLAN.groups) { const i = g.rows.indexOf(curResource); if (i >= 0) g.rows.splice(i, 1); }
-    save(); render(); closeResourceDialog();
+    const res = curResource;
+    historyBatch(() => {
+      for (const g of PLAN.groups) { const i = g.rows.indexOf(res); if (i >= 0) g.rows.splice(i, 1); }
+      if (curResKind === 'bauleiter') purgePerson(res.id);
+      logChange(`${curResKind === 'bauleiter' ? 'Bauleiter' : 'Zeile'} „${res.label || ''}" gelöscht`, 'zeitplan');
+    });
+    render(); closeResourceDialog();
   };
   document.getElementById('r-cancel').onclick = () => closeResourceDialog();
   roverlay.addEventListener('click', (e) => { if (e.target === roverlay) closeResourceDialog(); });
@@ -1522,7 +1549,14 @@
       const item = el('div', 'm-item');
       const row1 = el('div', 'm-row1');
       const name = document.createElement('input'); name.type = 'text'; name.value = m.name; name.placeholder = 'Name';
-      name.addEventListener('input', () => { m.name = name.value; save(); });
+      name.addEventListener('input', () => { m.name = name.value; });
+      let oldName = m.name;
+      name.addEventListener('change', () => {
+        const nn = name.value.trim();
+        for (const v of (PLAN.vehicles || [])) if (oldName && v.driver === oldName) v.driver = nn;   // Stammfahrzeug folgt dem neuen Namen
+        if (oldName !== nn) logChange(`Monteur umbenannt: „${oldName}" → „${nn}"`, 'zeitplan');
+        m.name = nn; oldName = nn; save(); render();
+      });
       const sel = document.createElement('select');
       [['intern', 'intern'], ['extern', 'extern (zubuchbar)']].forEach(([v, t]) => {
         const o = el('option', null, t); o.value = v; sel.appendChild(o);
@@ -1536,16 +1570,24 @@
       sizeWrap.appendChild(sizeInp);
       sizeWrap.style.display = m.type === 'extern' ? '' : 'none';
       sel.addEventListener('change', () => {
+        const toExt = sel.value === 'extern', bars = (m.bars || []).filter(b => b.cat === (toExt ? 'vacation' : 'booking'));
+        if (bars.length && !confirm(`${bars.length} Eintrag/Einträge von „${m.name}" ${toExt ? 'sind Urlaub – sie werden zu Buchungen (erhöhen die Kapazität)' : 'sind Buchungen – sie werden zu Urlaub (verringern die Kapazität)'}. Fortfahren?`)) { sel.value = m.type; return; }
+        for (const b of bars) b.cat = toExt ? 'booking' : 'vacation';
         m.type = sel.value;
+        logChange(`Monteur „${m.name}" ist jetzt ${toExt ? 'extern' : 'intern'}`, 'zeitplan');
         if (m.type === 'extern' && !m.size) m.size = 1;
         sizeWrap.style.display = m.type === 'extern' ? '' : 'none';
         save(); render(); refreshCapInfo();
       });
       const del = el('span', 'm-del', '✕'); del.title = 'Monteur entfernen';
       del.onclick = () => {
-        if (!confirm(`„${m.name}" wirklich entfernen?`)) return;
-        PLAN.team.splice(PLAN.team.indexOf(m), 1);
-        save(); render(); renderTeamList();
+        if (!confirm(`„${m.name}" wirklich entfernen?\nAlle Einsätze und Wochen-Einträge dieser Person werden ebenfalls entfernt.`)) return;
+        historyBatch(() => {
+          PLAN.team.splice(PLAN.team.indexOf(m), 1);
+          const n = purgePerson(m.id);
+          logChange(`Monteur „${m.name}" entfernt` + (n ? ` (${n} Einsatz-Zuordnung${n > 1 ? 'en' : ''} mit entfernt)` : ''), 'zeitplan');
+        });
+        render(); renderTeamList();
       };
       row1.appendChild(name); row1.appendChild(sel); row1.appendChild(sizeWrap); row1.appendChild(del);
 
@@ -1576,8 +1618,17 @@
     save(); render(); renderTeamList();
     const inputs = mList.querySelectorAll('input'); if (inputs.length) inputs[inputs.length - 1].focus();
   };
-  document.getElementById('m-close').onclick = () => { moverlay.hidden = true; };
-  moverlay.addEventListener('click', (e) => { if (e.target === moverlay) moverlay.hidden = true; });
+  // Schließen: angelegte, aber namenlos gebliebene Einträge wieder entfernen; Ansicht mit neuen Namen zeichnen
+  function closeTeamDialog() {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();   // offene Namensänderung übernehmen
+    const before = PLAN.team.length;
+    PLAN.team = PLAN.team.filter(m => (m.name || '').trim() || (m.bars || []).length);
+    moverlay.hidden = true;
+    if (PLAN.team.length !== before) save();
+    render();
+  }
+  document.getElementById('m-close').onclick = closeTeamDialog;
+  moverlay.addEventListener('click', (e) => { if (e.target === moverlay) closeTeamDialog(); });
 
   // ---- Bauleiter-Dialog (Liste analog Monteure) ----
   const bloverlay = document.getElementById('bloverlay');
@@ -1601,11 +1652,17 @@
       const item = el('div', 'm-item');
       const r1 = el('div', 'm-row1');
       const name = document.createElement('input'); name.type = 'text'; name.value = row.label || ''; name.placeholder = 'Name';
-      name.addEventListener('input', () => { row.label = name.value; save(); render(); });
+      name.addEventListener('input', () => { row.label = name.value; });
+      name.addEventListener('change', () => { row.label = name.value.trim(); save(); render(); });
       const del = el('span', 'm-del', '✕'); del.title = 'Bauleiter entfernen';
       del.onclick = () => {
-        if (!confirm(`„${row.label || 'Bauleiter'}" wirklich entfernen?`)) return;
-        g.rows.splice(g.rows.indexOf(row), 1); save(); render(); renderBauleiterList();
+        if (!confirm(`„${row.label || 'Bauleiter'}" wirklich entfernen?\nDie Bauleitungs-Einträge dieser Person werden ebenfalls entfernt.`)) return;
+        historyBatch(() => {
+          g.rows.splice(g.rows.indexOf(row), 1);
+          purgePerson(row.id);
+          logChange(`Bauleiter „${row.label || ''}" entfernt`, 'zeitplan');
+        });
+        render(); renderBauleiterList();
       };
       r1.appendChild(name); r1.appendChild(del);
       item.appendChild(r1); blList.appendChild(item);
@@ -1617,8 +1674,17 @@
     save(); render(); renderBauleiterList();
     const inputs = blList.querySelectorAll('input'); if (inputs.length) inputs[inputs.length - 1].focus();
   };
-  document.getElementById('bl-close').onclick = () => { bloverlay.hidden = true; };
-  bloverlay.addEventListener('click', (e) => { if (e.target === bloverlay) bloverlay.hidden = true; });
+  function closeBlDialog() {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const g = PLAN.groups.find(x => x.name === 'Bauleiter');
+    const before = g ? g.rows.length : 0;
+    if (g) g.rows = g.rows.filter(r => (r.label || '').trim() || (r.bars || []).length);
+    bloverlay.hidden = true;
+    if (g && g.rows.length !== before) save();
+    render();
+  }
+  document.getElementById('bl-close').onclick = closeBlDialog;
+  bloverlay.addEventListener('click', (e) => { if (e.target === bloverlay) closeBlDialog(); });
 
   // ---- Projekt-Dialog (Nummer / Ort / Name) ----
   const poverlay = document.getElementById('poverlay');
@@ -1696,8 +1762,12 @@
   document.getElementById('p-delete').onclick = () => {
     if (!curProject) return;
     if (!confirm(`Projekt „${curProject.label}" wirklich löschen?`)) return;
-    for (const g of PLAN.groups) { const i = g.rows.indexOf(curProject); if (i >= 0) g.rows.splice(i, 1); }
-    save(); render(); closeProjectDialog();
+    const pr = curProject;
+    historyBatch(() => {
+      for (const g of PLAN.groups) { const i = g.rows.indexOf(pr); if (i >= 0) g.rows.splice(i, 1); }
+      logChange(`Projekt „${pr.site ? pr.site + ' · ' : ''}${pr.label}" gelöscht (${(pr.bars || []).length} Termin${(pr.bars || []).length === 1 ? '' : 'e'})`, 'zeitplan');
+    });
+    render(); closeProjectDialog();
   };
   document.getElementById('p-cancel').onclick = () => closeProjectDialog();
   poverlay.addEventListener('click', (e) => { if (e.target === poverlay) closeProjectDialog(); });
@@ -1709,7 +1779,9 @@
   // ---- Render & Steuerung ----
   const viewport = document.getElementById('viewport');
   function render() { viewMode === 'week' ? renderWeek() : renderTimeline(); if (typeof updateArchiveToggle === 'function') updateArchiveToggle(); }
+  let weekShown = false;
   function renderTimeline() {
+    weekShown = false;
     document.documentElement.style.setProperty('--dw', dayWidth + 'px');
     const sl = viewport.scrollLeft, st = viewport.scrollTop;
     const capData = computeCapacity();
@@ -2010,6 +2082,8 @@
   let needMenu = null;
   function closeNeedMenu() { if (needMenu) { needMenu.remove(); needMenu = null; document.removeEventListener('mousedown', onNeedDocDown, true); } }
   function onNeedDocDown(e) { if (needMenu && !needMenu.contains(e.target)) closeNeedMenu(); }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && needMenu) closeNeedMenu(); });
+  document.getElementById('viewport').addEventListener('scroll', () => { if (needMenu) closeNeedMenu(); }, { passive: true });
   function openNeedPicker(cell, row, bar, idx, dISO, trade) {
     closeNeedMenu();
     // Phase mit definiertem Gewerk: direkt nutzen. Leerer Auto-Bedarf (kein Gewerk): erst beim
@@ -2061,7 +2135,7 @@
     }
     document.body.appendChild(needMenu);
     needMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - needMenu.offsetWidth - 8)) + 'px';
-    needMenu.style.top = (y + 4) + 'px';
+    needMenu.style.top = Math.max(8, Math.min(y + 4, window.innerHeight - needMenu.offsetHeight - 8)) + 'px';
     setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
   }
   function copyPersonWeek(p) {
@@ -2098,7 +2172,8 @@
   const WK_COLLAPSE_KEY = 'montageplanung_wk_collapsed';
   const wkCollapsed = new Set((() => { try { return JSON.parse(localStorage.getItem(WK_COLLAPSE_KEY)) || []; } catch (e) { return []; } })());
   function renderWeek() {
-    const sl = 0, st = viewport.scrollTop;
+    const sl = weekShown ? viewport.scrollLeft : 0, st = viewport.scrollTop;   // erst beim Wechsel in die Woche links beginnen
+    closeNeedMenu();
     const dates = weekDates();
     const kw = isoWeek(selMonday), year = new Date(selMonday).getUTCFullYear();
     document.getElementById('wkLabel').textContent = `KW ${kw} · ${fmt(selMonday)} – ${fmt(addDays(selMonday, 6))}  (${year})`;
@@ -2297,7 +2372,7 @@
             for (const t of der.ti) { const b = el('button', 'need-menu-item'); b.appendChild(el('span', null, tiLabel(t))); b.onclick = () => { closeNeedMenu(); openTi(t); }; needMenu.appendChild(b); }
             document.body.appendChild(needMenu);
             needMenu.style.left = Math.max(8, Math.min(e.clientX, window.innerWidth - needMenu.offsetWidth - 8)) + 'px';
-            needMenu.style.top = (e.clientY + 4) + 'px';
+            needMenu.style.top = Math.max(8, Math.min(e.clientY + 4, window.innerHeight - needMenu.offsetHeight - 8)) + 'px';
             setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
           });
           badges.appendChild(ti);
@@ -2372,6 +2447,7 @@
     viewport.innerHTML = '';
     viewport.appendChild(grid);
     viewport.scrollLeft = sl; viewport.scrollTop = st;
+    weekShown = true;
   }
 
   // ---- Wochenplan der Monteure als Bild (zum Verschicken) ----
@@ -2958,6 +3034,7 @@
   // Tastenkürzel: Strg/Cmd+Z = Rückgängig, Strg/Cmd+Umschalt+Z oder Strg+Y = Wiederholen (nicht beim Tippen)
   document.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;
+    if (document.querySelector('.overlay:not([hidden])') || !tiView.hidden) return;   // Dialog offen: Daten nicht unter der Maske austauschen
     const t = e.target, tag = t && t.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
     const k = e.key.toLowerCase();
@@ -2985,7 +3062,7 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=56';
+  const TI_SRC = 'termineinladung.html?v=57';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
