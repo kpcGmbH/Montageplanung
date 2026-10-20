@@ -703,3 +703,7 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .shot-img { display: block; width: 100%; height: auto; min-width: 760px; }
 
 .assign-part { font-size: 10.5px; color: #a35a00; background: #fdf0de; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+
+/* Hinweis auf neue Version */
+.update-banner { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 9000; display: flex; align-items: center; gap: 12px;
+  background: #fff; border: 1px solid var(--copper); border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 28px rgba(0,0,0,.22); font-size: 13px; color: var(--ink); max-width: calc(100vw - 32px); }

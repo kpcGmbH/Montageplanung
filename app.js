@@ -3326,6 +3326,44 @@
   scrollToToday();
   histReset();   // Ausgangszustand als Historie-Basis (erste Aktion wird rückgängig-fähig)
 
+  // ---- Immer die neueste Version: beim Start, bei Rückkehr in den Tab und alle 5 Minuten nachsehen ----
+  // Die laufende Version steht im ?v= der eingebundenen app.js; die aktuelle in der index.html auf dem Server
+  // (ohne Cache abgerufen). Ist sie neuer: sofort neu laden, wenn gefahrlos möglich – sonst Hinweis mit Knopf.
+  (function versionWatch() {
+    const runSrc = (document.querySelector('script[src*="app.js"]') || {}).src || '';
+    const running = +((runSrc.match(/[?&]v=(\d+)/) || [])[1] || 0);
+    if (!running || location.protocol === 'file:') return;
+    let banner = null;
+    const freshUrl = (v) => location.pathname + '?v=' + v;   // eigene URL → kein zwischengespeichertes index.html
+    const safe = () => !document.querySelector('.overlay:not([hidden])') && tiView.hidden && !(window.Cloud && Cloud.busy && Cloud.busy());
+    function showBanner(v) {
+      if (banner) return;
+      banner = el('div', 'update-banner');
+      banner.appendChild(el('span', null, 'Eine neue Version der Montageplanung ist verfügbar.'));
+      const b = el('button', 'btn primary', 'Jetzt neu laden'); b.onclick = () => { location.href = freshUrl(v); };
+      banner.appendChild(b);
+      document.body.appendChild(banner);
+    }
+    async function check(atStart) {
+      try {
+        const r = await fetch(location.pathname + '?nocache=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) return;
+        const latest = +(((await r.text()).match(/app\.js\?v=(\d+)/) || [])[1] || 0);
+        if (!(latest > running)) return;
+        // Schleifenschutz: wurde für diese Version schon einmal neu geladen und läuft trotzdem die alte → nur Hinweis
+        let tried = ''; try { tried = sessionStorage.getItem('montageplanung_upd') || ''; } catch (e) {}
+        const loginReturn = /[#&](code|error|state)=/.test(location.hash);   // gerade von der Microsoft-Anmeldung zurück → nicht wegnavigieren
+        if (tried !== String(latest) && !loginReturn && (atStart || (document.visibilityState === 'visible' && safe()))) {
+          try { sessionStorage.setItem('montageplanung_upd', String(latest)); } catch (e) {}
+          location.href = freshUrl(latest);
+        } else showBanner(latest);
+      } catch (e) { /* offline → später wieder */ }
+    }
+    check(true);
+    setInterval(() => check(false), 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(false); });
+  })();
+
   if (window.Cloud) {
     Cloud.onStatus(updateCloudUI);
     Cloud.onSnapshot(() => snapshot());   // liefert cloud.js den aktuellen lokalen Stand fürs Zusammenführen

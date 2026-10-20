@@ -249,6 +249,7 @@ window.Cloud = (function () {
   // Speichern ausführen: immer den Stand von JETZT (kam ein Live-Sync dazwischen, enthielte der vorgemerkte Stand
   // dessen Änderungen nicht). Bei offenem Dialog nur ohne Zusammenführen; sonst später erneut.
   async function flushSave() {
+    saveTimer = null;
     if (syncing) { saveTimer = setTimeout(flushSave, 400); return; }
     const paused = !canSyncFn();
     syncing = true;
@@ -302,6 +303,7 @@ window.Cloud = (function () {
 
   return {
     isReady() { return !!msalAccount; },
+    busy() { return !!saveTimer || syncing || !!retryTimer; },   // ungespeicherte Änderung unterwegs → nicht neu laden
     needsLogin() { return needRelogin; },   // Sitzung abgelaufen → Nutzer muss „Neu anmelden" klicken
     inPopup() { return IN_POPUP; },
     saveDraft(name, obj) { return saveDraftFile(name, obj); },
