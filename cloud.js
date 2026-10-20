@@ -75,7 +75,10 @@ window.Cloud = (function () {
       }
       return out;
     }
-    const ik = (Array.isArray(local) && Array.isArray(remote)) ? (idKeyOf(local) || idKeyOf(remote)) : null;
+    let ik = (Array.isArray(local) && Array.isArray(remote)) ? (idKeyOf(local) || idKeyOf(remote)) : null;
+    // Hat nur eine Seite die Schlüssel (z. B. neue Balken-IDs, alter Stand ohne), nicht darüber mergen – sonst doppelte Einträge
+    const hasKey = (arr) => !Array.isArray(arr) || !arr.length || arr.every(e => e && typeof e === 'object' && e[ik] != null);
+    if (ik === 'bid' && !(hasKey(local) && hasKey(remote) && hasKey(base))) ik = null;
     if (ik) {                              // Arrays mit stabilem Schlüssel: elementweise mergen
       const bm = mapBy(base, ik), rm = mapBy(remote, ik), out = [], seen = new Set();
       for (const e of local) { const id = e[ik]; seen.add(id);
@@ -92,7 +95,7 @@ window.Cloud = (function () {
     if (Array.isArray(local) && Array.isArray(remote)) {
       // Arrays ohne Schlüssel (z. B. Zuordnungen „ganze Phase" als Text, Gewerke-Listen): als Menge zusammenführen –
       // beide Seiten dürfen Einträge hinzufügen/entfernen, statt dass eine Seite die andere komplett überschreibt.
-      const key = (x) => JSON.stringify(x), B = new Set((Array.isArray(base) ? base : []).map(key)), R = new Set(remote.map(key));
+      const key = (x) => JSON.stringify((x && typeof x === 'object' && !Array.isArray(x) && 'bid' in x) ? Object.assign({}, x, { bid: undefined }) : x), B = new Set((Array.isArray(base) ? base : []).map(key)), R = new Set(remote.map(key));
       const out = [], seen = new Set();
       for (const e of local) { const k = key(e); if (seen.has(k)) continue; if (R.has(k) || !B.has(k)) { out.push(e); seen.add(k); } }
       for (const e of remote) { const k = key(e); if (seen.has(k)) continue; if (!B.has(k)) { out.push(e); seen.add(k); } }
@@ -128,7 +131,7 @@ window.Cloud = (function () {
   // nach einem Speicherfehler, geschlossenem Tab oder neuer Anmeldung werden sie beim nächsten Start zusammengeführt.
   function rememberUnsaved(local) {
     try {
-      if (local && baseSnap && !eq(local, baseSnap)) localStorage.setItem(UNSAVED_KEY, JSON.stringify({ base: baseSnap, local, ts: Date.now() }));
+      if (local && baseSnap && !eq(local, baseSnap)) localStorage.setItem(UNSAVED_KEY, JSON.stringify({ base: baseSnap, local, ts: Date.now(), user: msalAccount && msalAccount.username }));
     } catch (e) { /* Speicher voll / gesperrt → ohne Sicherung weiter */ }
   }
   const clearUnsaved = () => { try { localStorage.removeItem(UNSAVED_KEY); sessionStorage.removeItem(UNSAVED_KEY); } catch (e) {} };
@@ -137,7 +140,8 @@ window.Cloud = (function () {
     let st = null;
     try { st = JSON.parse(localStorage.getItem(UNSAVED_KEY) || sessionStorage.getItem(UNSAVED_KEY) || 'null'); clearUnsaved(); } catch (e) { return; }
     if (!st || !st.local || !baseSnap || Date.now() - (st.ts || 0) > 3 * 24 * 3600 * 1000) return;
-    const merged = merge3(st.base || baseSnap, st.local, baseSnap);
+    if (st.user && msalAccount && st.user !== msalAccount.username) return;   // fremdes Konto (gemeinsamer PC) → nicht übernehmen
+    const merged = merge3(st.base || baseSnap, st.local, baseSnap, true);   // im Konflikt gilt der neuere Stand der anderen
     if (eq(merged, baseSnap)) return;
     if (applyFn) applyFn(clone(merged), 'merge');
     await push(merged);
@@ -203,12 +207,15 @@ window.Cloud = (function () {
     return toApply;
   }
 
-  async function push(snap) {
+  async function push(snap, noMerge) {
     await resolveSite();
     const headers = { 'Content-Type': 'application/json' };
     if (etag) headers['If-Match'] = etag;
     const r = await graph(planPath(), { method: 'PUT', headers, body: JSON.stringify(snap) });
-    if (r.status === 412) { return await mergeAndRetry(0); }   // jemand anderes hat gespeichert → zusammenführen
+    if (r.status === 412) {   // jemand anderes hat gespeichert → zusammenführen (bei offenem Dialog erst danach)
+      if (noMerge) { const err = new Error('später zusammenführen'); err.deferred = true; throw err; }
+      return await mergeAndRetry(0);
+    }
     if (!r.ok) throw new Error('Speichern fehlgeschlagen (' + r.status + ')');
     const j = await r.json().catch(() => ({}));
     etag = j.eTag || j.cTag || etag; baseSnap = clone(snap);
@@ -238,6 +245,23 @@ window.Cloud = (function () {
 
   // Live-Sync: regelmäßig + bei Fokus den Serverstand holen und mergen
   let canSyncFn = () => true;
+  let retryTimer = null;
+  // Speichern ausführen: immer den Stand von JETZT (kam ein Live-Sync dazwischen, enthielte der vorgemerkte Stand
+  // dessen Änderungen nicht). Bei offenem Dialog nur ohne Zusammenführen; sonst später erneut.
+  async function flushSave() {
+    if (syncing) { saveTimer = setTimeout(flushSave, 400); return; }
+    const paused = !canSyncFn();
+    syncing = true;
+    try { setStatus('speichere…', 'sync'); await push(snapFn ? snapFn() : pendingSnap, paused); clearTimeout(retryTimer); retryTimer = null; }
+    catch (e) {
+      if (e.deferred) { saveTimer = setTimeout(flushSave, 1500); }
+      else if (!e.relogin) {
+        setStatus('Speicher-Fehler: ' + e.message + ' – neuer Versuch in 20 s', 'warn');
+        clearTimeout(retryTimer); retryTimer = setTimeout(flushSave, 20000);   // genau EIN Wiederholversuch, keine Kettenbildung
+      }
+    }
+    finally { syncing = false; }
+  }
   async function safePull() { if (syncing || !msalAccount || !canSyncFn()) return; syncing = true; try { await pull(false); } catch (e) { /* still weiter */ } finally { syncing = false; } }
   const onFocusSync = () => safePull();
   const onVisSync = () => { if (document.visibilityState === 'visible') safePull(); };
@@ -337,21 +361,7 @@ window.Cloud = (function () {
       pendingSnap = snap;
       rememberUnsaved(snap);
       clearTimeout(saveTimer);
-      saveTimer = setTimeout(async () => {
-        if (!canSyncFn()) { saveTimer = setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(snapFn ? snapFn() : pendingSnap); }, 1500); return; }
-        if (syncing) { saveTimer = setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(pendingSnap); }, 400); return; }
-        syncing = true;
-        // Den Stand von JETZT speichern, nicht den vom Klick: kam in den 1,5 s ein Live-Sync dazwischen, enthielte
-        // der vorgemerkte Stand die gerade hereingeholten Änderungen der anderen nicht und überschriebe sie.
-        try { setStatus('speichere…', 'sync'); await push(snapFn ? snapFn() : pendingSnap); }
-        catch (e) {
-          if (!e.relogin) {
-            setStatus('Speicher-Fehler: ' + e.message + ' – neuer Versuch in 20 s', 'warn');
-            setTimeout(() => { if (window.Cloud) window.Cloud.scheduleSave(snapFn ? snapFn() : pendingSnap); }, 20000);
-          }
-        }
-        finally { syncing = false; }
-      }, 1500);
+      saveTimer = setTimeout(flushSave, 1500);
     },
   };
 })();

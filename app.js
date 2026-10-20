@@ -152,8 +152,7 @@
   // und EIN Rückgängig-Schritt; Zwischenschritte räumen nichts auf (kein Löschen gerade geleerter Fenster).
   function historyBatch(fn) {
     batchDepth++;
-    try { fn(); } finally { batchDepth--; }
-    save();
+    try { fn(); } finally { batchDepth--; save(); }
   }
   function save() {
     if (batchDepth > 0) return;
@@ -308,7 +307,7 @@
   // Backfill deterministisch (rowId + Position + Datum), damit alle Clients einem Alt-Balken dieselbe ID geben.
   function ensureIds() {
     // Eindeutig innerhalb der Liste: fällt die deterministische ID mit einer vorhandenen zusammen, Zusatz anhängen
-    const uniq = (id, taken) => { let x = id; while (taken.has(x)) x = id + '~' + Math.random().toString(36).slice(2, 7); taken.add(x); return x; };
+    const uniq = (id, taken) => { let x = id, n = 1; while (taken.has(x)) x = id + '~d' + (n++); taken.add(x); return x; };   // deterministisch: alle Clients vergeben dieselbe ID
     const fix = (bars, prefix, withPhases) => {
       const taken = new Set();
       (bars || []).forEach((bar, bi) => {
@@ -2802,8 +2801,12 @@
     for (const row of projRows()) for (const b of row.bars) {
       const extra = isKleinRow(row) ? { label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' } : {};
       if (isBl) { if (blRanges(b).some(on)) out.push(Object.assign({ rowId: row.id, bl: true, bar: b }, extra)); continue; }
-      for (const ph of (b.phases || [])) if (assignedRanges(ph).some(on))
+      const workday = isWorkdayMs(ms);
+      for (const ph of (b.phases || [])) if ((workday || ph.weekend) && assignedRanges(ph).some(on))
         out.push(Object.assign({ rowId: row.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b }, extra));
+      // Altdaten: Bedarf ohne Phasen (crew) – sonst ginge die Zuordnung beim Speichern verloren
+      if (!(b.phases || []).length && b.crew && workday && (b.crew.assigned || []).some(a => idOf(a) === person.id) && parse(b.crew.start || b.start) <= ms && parse(b.crew.end || b.end) >= ms)
+        out.push(Object.assign({ rowId: row.id, gewerk: (b.crew.trade && TRADES()[b.crew.trade]) ? b.crew.trade : firstTradeOf(person), bar: b }, extra));
     }
     return out;
   }
@@ -3062,7 +3065,7 @@
   const tiTitle = document.getElementById('tiTitle');
   const tiStatus = document.getElementById('tiStatus');
   let tiProject = null, tiBar = null, tiPhase = [], tiReady = false, tiFresh = false;   // tiPhase: Phasen-Indizes (leer = ganze Montage / Projekt)
-  const TI_SRC = 'termineinladung.html?v=57';
+  const TI_SRC = 'termineinladung.html?v=58';
   // Phasen-Auswahl normalisieren: einzelner Index oder Liste → gültige, sortierte Indizes
   const tiIdxs = (bar, x) => (!bar || !bar.phases) ? [] : [...new Set([].concat(x == null ? [] : x))].filter(i => i >= 0 && bar.phases[i]).sort((a, b) => a - b);
   const tiTradeLabels = (bar, x) => [...new Set(tiIdxs(bar, x).map(i => (TRADES()[bar.phases[i].trade] || {}).label || 'Gewerk'))].join(' + ');
@@ -3196,6 +3199,7 @@
       try {
         state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase));
         if (!state && seq === tiSeq) state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase, true));
+        if (state && state.__cleared) state = null;   // bewusst geleert
       } catch (e) { /* kein Draft / offline */ }
     }
     if (seq !== tiSeq || !tiReady) return;
@@ -3224,7 +3228,7 @@
   window.addEventListener('message', async (e) => {
     if (!tiFrame || e.source !== tiFrame.contentWindow) return;
     const m = e.data || {};
-    if (m.type !== 'ti-ready' && m.key != null && m.key !== tiKey()) return;   // Nachricht einer zuvor geöffneten Einladung
+    if (m.type !== 'ti-ready' && m.key && m.key !== tiKey()) return;   // Nachricht einer zuvor geöffneten Einladung
     if (m.type === 'ti-ready') { tiReady = true; tiSendInit(); }
     else if (m.type === 'ti-save') {
       if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, TI_ORIGIN); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
@@ -3235,7 +3239,7 @@
     else if (m.type === 'ti-shared') { tiStoreShared(m.fields); }
     else if (m.type === 'ti-reset') {
       // „Formular leeren": auch den gespeicherten Entwurf leeren, sonst käme er beim nächsten Öffnen zurück
-      if (window.Cloud && Cloud.isReady()) Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), null).catch(() => {});
+      if (window.Cloud && Cloud.isReady()) Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), { __cleared: true }).catch(() => {});
       tiFresh = true; tiReload();
     }
   });
@@ -3316,7 +3320,7 @@
       if (mode === 'merge') { histSync(); updateUndoUI(); } else { histReset(); revealApp(); }   // Abgleich im Hintergrund: Ansicht nicht verspringen
     });
     // Solange ein Dialog/die Termineinladung offen ist, nicht abgleichen – die Maske hält Verweise auf die Daten
-    Cloud.onCanSync(() => !document.querySelector('.overlay:not([hidden])') && (!tiView || tiView.hidden));
+    Cloud.onCanSync(() => !['overlay', 'poverlay', 'roverlay', 'moverlay', 'bloverlay', 'woverlay'].some(id => { const o = document.getElementById(id); return o && !o.hidden; }) && (!tiView || tiView.hidden));
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
     Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
   } else {

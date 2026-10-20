@@ -1063,7 +1063,7 @@ function applyShared(sh){
 }
 // Vorauswahl aus der Planung (Fahrzeug mit Insassen, Monteure, Übernachtung): wird bei jedem Öffnen neu
 // übernommen – außer das Feld wurde in dieser Einladung von Hand geändert.
-const AUTO_IDS = ['fahrzeug','mitfahrer','uebernachtung','datum','zeitraum'];
+const AUTO_IDS = ['fahrzeug','mitfahrer','uebernachtung'];   // Datum/Zeitraum nicht: von Hand geänderte Termine blieben sonst nicht stehen
 let manualFields = {};
 function applyAuto(pf, st){
   if (!pf) return;
