@@ -1175,9 +1175,11 @@
       const wkc = document.createElement('input'); wkc.type = 'checkbox'; wkc.checked = !!ph.weekend; wkc.title = 'Auch am Wochenende (Sa/So) arbeiten';
       const cnt = document.createElement('input'); cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.value = ph.count || 1; cnt.title = 'Anzahl Personen';
       const endHint = el('div', 'phase-endhint', '');
+      let rebuildAsg = null;   // Monteur-Liste neu zeichnen, wenn sich der Zeitraum ändert (Teil-Zuordnungen)
       const refreshEnd = () => {
         if (!ph.weekend) { ph.start = snapWorkday(ph.start); von.value = ph.start; }
         ph.end = endFromDays(ph.start, ph.days, ph.weekend);
+        if (rebuildAsg) rebuildAsg();
         endHint.textContent = '→ endet ' + wdShort(ph.end) + ' ' + fmt(parse(ph.end)) + (isHalf(ph) ? (+ph.days < 1 ? ' · halber Tag' : ' · letzter Tag halb') : '') + (ph.weekend ? ' · inkl. Wochenende' : '');
       };
       von.onchange = () => { ph.start = von.value || ph.start; refreshEnd(); };
@@ -1217,6 +1219,15 @@
           any = true;
           const lab = el('label', null);
           const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = m.id; cb.checked = (ph.assigned || []).some(a => idOf(a) === m.id);
+          // Nur an einzelnen Tagen eingeplant (z. B. aus der Woche)? → halb angehakt + Tage nennen; Klick = ganze Phase
+          let partDays = null;
+          if (cb.checked && !(ph.assigned || []).some(a => a === m.id)) {
+            const covered = new Set();
+            for (const a of ph.assigned) if (typeof a !== 'string' && a.id === m.id) for (let x = parse(a.start); x <= parse(a.end); x = addDays(x, 1)) covered.add(x);
+            const all = []; for (let x = parse(ph.start); x <= parse(ph.end); x = addDays(x, 1)) if (ph.weekend || isWorkdayMs(x)) all.push(x);
+            const on = all.filter(x => covered.has(x));
+            if (on.length < all.length) { partDays = on; cb.checked = false; cb.indeterminate = true; }
+          }
           cb.onchange = () => {
             ph.assigned = (ph.assigned || []).filter(a => idOf(a) !== m.id);  // vorhandene (Teil-)Bereiche der Person entfernen
             if (cb.checked) ph.assigned.push(m.id);                            // anhaken = ganze Phase
@@ -1225,6 +1236,11 @@
           };
           const span = el('span', m.type === 'extern' ? 'ext' : null, m.name + (m.type === 'extern' ? ' (ext)' : ''));
           lab.appendChild(cb); lab.appendChild(span); lab.appendChild(tradeTags(m.trades));
+          if (partDays) {
+            const txt = partDays.length ? 'nur ' + partDays.slice(0, 4).map(x => WD_SHORT[new Date(x).getUTCDay()] + ' ' + fmt(x).slice(0, 6)).join(', ') + (partDays.length > 4 ? ' …' : '') : 'außerhalb des Zeitraums';
+            lab.appendChild(el('span', 'assign-part', txt));
+            lab.title = m.name + ' ist nur an einzelnen Tagen dieser Phase eingeplant.\nAnhaken = für die ganze Phase einplanen.';
+          }
           asg.appendChild(lab);
         }
         if (!any) asg.appendChild(el('span', 'assign-empty', '— kein Monteur mit dieser Qualifikation —'));
@@ -1235,6 +1251,7 @@
         buildAsg();
       };
       buildAsg();
+      rebuildAsg = buildAsg;
       card.appendChild(gwL); card.appendChild(line2); card.appendChild(endHint); card.appendChild(asgTitle); card.appendChild(asg);
       fPhases.appendChild(card);
     });

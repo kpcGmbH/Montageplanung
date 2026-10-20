@@ -701,3 +701,5 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .dialog.shot-dialog { width: min(1100px, calc(100vw - 28px)); }
 .shot-wrap { overflow: auto; max-height: calc(100vh - 190px); border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .shot-img { display: block; width: 100%; height: auto; min-width: 760px; }
+
+.assign-part { font-size: 10.5px; color: #a35a00; background: #fdf0de; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
