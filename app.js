@@ -668,9 +668,10 @@
         const phs = phasesOf(bar);
         const hit = phs.some(ph => assignedRanges(ph).some(r => r.id === pid && parse(r.start) <= D && parse(r.end) >= D));
         if (!hit) continue;
+        const before = shiftSnap(bar);
         bar.start = sh(bar.start); bar.end = sh(bar.end);
         shiftBarContent(bar, delta);
-        logChange(`Einsatz „${bar.label || nm}" (${nm}, ${monteurName(pid)}) verschoben → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}`, 'woche');
+        logChange(`Ganzer Einsatz „${bar.label || nm}" (${nm}) verschoben – gezogen bei ${monteurName(pid)} · ${describeShift(bar, before)}`, 'woche');
         save();
         return;   // nur den einen (getroffenen) Einsatz verschieben
       }
@@ -1068,6 +1069,18 @@
     // Bauleitung wandert mit (sonst zöge die Fenster-Regel das Fenster über die alten Tage zurück)
     if (bar.bl) bar.bl = bar.bl.map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
   }
+  // Verlaufstext fürs Verschieben: altes → neues Fenster, je Gewerk der Zeitraum und wer mitgewandert ist
+  const shiftSnap = (bar) => ({ start: bar.start, end: bar.end, phases: (bar.phases || []).map(p => ({ trade: p.trade, start: p.start, end: p.end })),
+    ids: [...new Set((bar.phases || []).flatMap(p => assignedRanges(p).map(r => r.id)))], bl: [...new Set(blRanges(bar).map(r => r.id))] });
+  function describeShift(bar, before) {
+    const dd = (iso) => WD_SHORT[new Date(parse(iso)).getUTCDay()] + ' ' + fmt(parse(iso)).slice(0, 6);
+    const span = (o) => o.start === o.end ? dd(o.start) : dd(o.start) + '–' + dd(o.end);
+    const parts = ['Fenster ' + span(before) + ' → ' + span(bar)];
+    (bar.phases || []).forEach((p, i) => { const o = before.phases[i]; if (o && (o.start !== p.start || o.end !== p.end)) parts.push(((TRADES()[p.trade] || {}).label || 'Phase') + ': ' + span(o) + ' → ' + span(p)); });
+    if (before.ids.length) parts.push('Monteure mit verschoben: ' + before.ids.map(monteurName).join(', '));
+    if (before.bl.length) parts.push('Bauleitung mit verschoben: ' + before.bl.map(monteurName).join(', '));
+    return parts.join(' · ');
+  }
   function attachDrag(b, opts) {
     opts = opts || {};
     b.addEventListener('pointerdown', (e) => {
@@ -1097,14 +1110,15 @@
         b.classList.remove('dragging');
         if (!moved && mode === 'move') { (opts.onClick ? opts.onClick() : openEditor(b._row, bar, false)); return; }
         if (nx0 !== ox0 || nx1 !== ox1) {
+          const before = shiftSnap(bar);
           bar.start = isoStr(addDays(startMs, nx0));
           bar.end = isoStr(addDays(startMs, nx1));
           // Beim Verschieben (nicht Resize) wandern die Gewerke/Phasen + Zuordnungen mit.
           if (mode === 'move') shiftBarContent(bar, nx0 - ox0);
           if (mode !== 'move' && fitBar(bar)) toast('Das Fenster kann nicht kürzer sein als die darin geplanten Einsätze – zuerst die Phase kürzen.');
           const rowNm = b._row.site || b._row.label, barNm = bar.label || '(ohne Bezeichnung)';
-          const verb = mode === 'move' ? 'verschoben' : 'Dauer geändert';
-          logChange(`Einsatz „${barNm}" (${rowNm}) ${verb} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}`, 'zeitplan');
+          if (mode === 'move') logChange(`Einsatz „${barNm}" (${rowNm}) verschoben · ${describeShift(bar, before)}`, 'zeitplan');
+          else logChange(`Einsatz „${barNm}" (${rowNm}) Fenster geändert → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))} (Monteure nicht verschoben)`, 'zeitplan');
           save(); render();
         }
       };
