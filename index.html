@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=124">
+  <link rel="stylesheet" href="styles.css?v=125">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -58,6 +58,7 @@
     <div class="hint" id="hint">Doppelklick auf eine leere Zeile = neuer Termin &nbsp;·&nbsp; Balken ziehen = verschieben &nbsp;·&nbsp; Ränder ziehen = Dauer ändern &nbsp;·&nbsp; Klick = bearbeiten</div>
     <div class="weekbar svcbar" id="svcbar" hidden>
       <input id="svcSearch" class="search" type="search" placeholder="Kunde / Ort suchen…">
+      <select id="svcSort" title="Sortierung"><option value="ort">Sortierung: Ort</option><option value="due">Sortierung: Fälligkeit</option></select>
       <select id="svcFilter" title="Anzeigen">
         <option value="">alle aktiven</option>
         <option value="due">fällig / überfällig</option>
@@ -356,8 +357,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=124"></script>
-  <script src="cloud.js?v=124"></script>
-  <script src="app.js?v=124"></script>
+  <script src="data.js?v=125"></script>
+  <script src="cloud.js?v=125"></script>
+  <script src="app.js?v=125"></script>
 </body>
 </html>

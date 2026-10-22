@@ -3288,8 +3288,12 @@
     // Gruppen: Anlagen desselben Objekts (Ort + PNr) zusammen
     const groups = new Map();
     for (const s of list) { const k = svcGroupKey(s); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
-    const glist = [...groups.entries()].map(([k, items]) => ({ k, items, label: svcGroupLabel(items) }))
-      .sort((a, b) => (a.items[0].ort || '').localeCompare(b.items[0].ort || '', 'de') || a.label.localeCompare(b.label, 'de'));
+    // Sortierung: nach Ort (alphabetisch) oder nach Fälligkeit (früheste zuerst, ohne Fälligkeit am Ende)
+    const byDue = S('svcSort').value === 'due';
+    const dueKey = (items) => items.map(x => x.faellig).filter(Boolean).sort()[0] || '9999-99';
+    const byOrt = (a, b) => (a.items[0].ort || '').localeCompare(b.items[0].ort || '', 'de') || a.label.localeCompare(b.label, 'de');
+    const glist = [...groups.entries()].map(([k, items]) => ({ k, items: byDue ? items.slice().sort((x, y) => (x.faellig || '9999-99').localeCompare(y.faellig || '9999-99')) : items, label: svcGroupLabel(items) }))
+      .sort((a, b) => byDue ? (dueKey(a.items).localeCompare(dueKey(b.items)) || byOrt(a, b)) : byOrt(a, b));
     for (const g of glist) {
       if (g.items.length === 1) { contractRow(g.items[0], false); continue; }
       const open = kdOpen.has(g.k) || !!q;
@@ -3378,6 +3382,8 @@
     document.body.appendChild(ov);
   }
   let svcShown = false;
+  { const so = S('svcSort'); try { so.value = localStorage.getItem('montageplanung_kd_sort') || 'ort'; } catch (e) {}
+    so.addEventListener('change', () => { try { localStorage.setItem('montageplanung_kd_sort', so.value); } catch (e) {} renderService(); }); }
   ['svcSearch', 'svcFilter'].forEach(id => { const e = document.getElementById(id); e.addEventListener(id === 'svcSearch' ? 'input' : 'change', () => renderService()); });
 
   // ---- Dialog ----
