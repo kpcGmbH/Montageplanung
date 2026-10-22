@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=123">
+  <link rel="stylesheet" href="styles.css?v=124">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -58,7 +58,6 @@
     <div class="hint" id="hint">Doppelklick auf eine leere Zeile = neuer Termin &nbsp;·&nbsp; Balken ziehen = verschieben &nbsp;·&nbsp; Ränder ziehen = Dauer ändern &nbsp;·&nbsp; Klick = bearbeiten</div>
     <div class="weekbar svcbar" id="svcbar" hidden>
       <input id="svcSearch" class="search" type="search" placeholder="Kunde / Ort suchen…">
-      <select id="svcBearb" title="Bearbeiter"><option value="">alle Bearbeiter</option></select>
       <select id="svcFilter" title="Anzeigen">
         <option value="">alle aktiven</option>
         <option value="due">fällig / überfällig</option>
@@ -299,9 +298,7 @@
       <div class="row2">
         <label>Nächste Wartung (Monat) <input id="s-faellig" type="month"></label>
         <label>€ / Jahr <input id="s-preis" type="text" inputmode="decimal"></label>
-        <label>Bearbeiter <input id="s-bearb" type="text" list="svcBearbList"></label>
       </div>
-      <datalist id="svcBearbList"></datalist>
       <div class="row2">
         <label>Abnahme / Gewährleistungsbeginn <input id="s-abnahme" type="text"></label>
         <label>Gewährleistungsende <input id="s-gewende" type="text"></label>
@@ -359,8 +356,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=123"></script>
-  <script src="cloud.js?v=123"></script>
-  <script src="app.js?v=123"></script>
+  <script src="data.js?v=124"></script>
+  <script src="cloud.js?v=124"></script>
+  <script src="app.js?v=124"></script>
 </body>
 </html>

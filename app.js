@@ -3070,7 +3070,7 @@
   // Freigabe: die Ansicht gibt es vorerst nur für diese Logins. Die Daten liegen NICHT im gemeinsamen Plan,
   // sondern in einer eigenen Datei der Site (Kundendienst/wartungsvertraege.json) und werden nur hier geladen.
   // Anmeldename im Microsoft-Konto ist „wahlj@…" (so steht er auch im Verlauf); die Mailadresse zur Sicherheit mit
-  const KD_USERS = ['wahlj', 'johannes.wahl'];
+  const KD_USERS = ['wahlj', 'johannes.wahl', 'wahlc', 'carolin.wahl'];
   const KD_FOLDER = 'Kundendienst', KD_FILE = 'wartungsvertraege.json', KD_LOCAL = 'montageplanung_kundendienst';
   const kdLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);   // lokale Entwicklung ohne Anmeldung
   function kdAllowed() {
@@ -3079,13 +3079,28 @@
   }
   const svcList = () => kdData;
   let kdSaveTimer = null;
+  // Mehrere Freigegebene schreiben dieselbe Datei: vor dem Speichern den Stand vom Server holen und per
+  // 3-Wege-Merge (Basis = zuletzt geladener Stand) zusammenführen, statt die Änderungen der anderen zu überschreiben.
+  let kdBase = [];
+  async function kdSync(save) {
+    if (!(window.Cloud && Cloud.isReady())) { if (save) { try { localStorage.setItem(KD_LOCAL, JSON.stringify(kdData)); } catch (e) {} } return; }
+    const f = await Cloud.loadFile(KD_FOLDER, KD_FILE);
+    const remote = (f && Array.isArray(f.service)) ? f.service : [];
+    const merged = Cloud.merge3(kdBase, kdData, remote);
+    const changedLocal = JSON.stringify(merged) !== JSON.stringify(remote);
+    if (save || changedLocal) {
+      if (changedLocal) await Cloud.saveFile(KD_FOLDER, KD_FILE, { version: 1, updated: new Date().toISOString(), by: Cloud.account(), service: merged });
+    }
+    kdBase = JSON.parse(JSON.stringify(merged));
+    if (JSON.stringify(merged) !== JSON.stringify(kdData)) {
+      kdData = JSON.parse(JSON.stringify(merged));
+      if (viewMode === 'service' && soverlay.hidden) renderService();
+    }
+  }
   function kdSave() {
     clearTimeout(kdSaveTimer);
     kdSaveTimer = setTimeout(async () => {
-      if (window.Cloud && Cloud.isReady()) {
-        try { await Cloud.saveFile(KD_FOLDER, KD_FILE, { version: 1, updated: new Date().toISOString(), by: Cloud.account(), service: kdData }); }
-        catch (e) { toast('Kundendienst: Speichern fehlgeschlagen – ' + (e && e.message || e)); }
-      } else { try { localStorage.setItem(KD_LOCAL, JSON.stringify(kdData)); } catch (e) {} }
+      try { await kdSync(true); } catch (e) { toast('Kundendienst: Speichern fehlgeschlagen – ' + (e && e.message || e)); }
     }, 600);
   }
   async function kdInit() {
@@ -3093,7 +3108,7 @@
     document.getElementById('viewService').hidden = !ok;
     if (!ok) { kdData = []; if (viewMode === 'service') setView('timeline'); return; }
     try {
-      if (window.Cloud && Cloud.isReady()) { const f = await Cloud.loadFile(KD_FOLDER, KD_FILE); kdData = (f && Array.isArray(f.service)) ? f.service : []; }
+      if (window.Cloud && Cloud.isReady()) { const f = await Cloud.loadFile(KD_FOLDER, KD_FILE); kdData = (f && Array.isArray(f.service)) ? f.service : []; kdBase = JSON.parse(JSON.stringify(kdData)); }
       else kdData = JSON.parse(localStorage.getItem(KD_LOCAL) || '[]');
       if (kdData.map(svcNormalize).some(Boolean)) kdSave();   // Stand/aktiv einmalig aus den Notizen ableiten
     } catch (e) { toast('Kundendienst: Laden fehlgeschlagen – ' + (e && e.message || e)); }
@@ -3168,12 +3183,9 @@
     if (!svcMonthStart) svcMonthStart = ymAdd(now, -2);
     const months = []; for (let i = 0; i < 16; i++) months.push(ymAdd(svcMonthStart, i));
     const q = (S('svcSearch').value || '').trim().toLowerCase();
-    const bearb = S('svcBearb').value, flt = S('svcFilter').value;
-    const bsel = S('svcBearb'), names = [...new Set(svcList().map(s => (s.bearbeiter || '').trim()).filter(Boolean))].sort();
-    if (bsel.options.length - 1 !== names.length) { const cur = bsel.value; bsel.innerHTML = '<option value="">alle Bearbeiter</option>'; for (const n of names) { const o = el('option', null, n); o.value = n; bsel.appendChild(o); } bsel.value = cur; }
+    const flt = S('svcFilter').value;
     const base = svcList().filter(s => {
       if (q && !((s.kunde || '') + ' ' + (s.ort || '') + ' ' + (s.pnr || '')).toLowerCase().includes(q)) return false;
-      if (bearb && (s.bearbeiter || '').trim() !== bearb) return false;
       return flt === 'inactive' ? s.aktiv === false : s.aktiv !== false;
     });
     const isTodo = (s) => { const st = svcState(s); return (st === 'over' || st === 'soon'); };
@@ -3205,7 +3217,6 @@
         it.appendChild(el('span', 'svc-todo-name', svcName(s)));
         it.appendChild(el('span', 'svc-todo-due', s.faellig ? (s.faellig < now ? 'seit ' : '') + ymLabel(s.faellig) : ''));
         const stb = el('span', 'svc-st st-' + svcStatus(s), SVC_ST[svcStatus(s)]); it.appendChild(stb);
-        if (s.bearbeiter) it.appendChild(el('span', 'svc-bearb', s.bearbeiter));
         it.onclick = () => openServiceDialog(s);
         ul.appendChild(it);
       }
@@ -3265,7 +3276,6 @@
       nm.appendChild(el('span', 'sv-dot sv-' + st));
       nm.appendChild(el('span', 'wk-person-name', indent ? (s.kunde || '') : svcName(s)));
       if (gaps.length) { const w = el('span', 'svc-gap', '⚠'); w.title = 'fehlt: ' + gaps.join(', '); nm.appendChild(w); }
-      if (s.bearbeiter) nm.appendChild(el('span', 'svc-bearb', s.bearbeiter));
       nm.title = svcName(s) + (s.pnr ? '\nPNr ' + s.pnr : '') + '\n' + (s.intervall ? s.intervall + '× jährlich' : 'ohne Intervall') + (s.notiz ? '\n' + s.notiz : '') + '\nKlick: bearbeiten';
       nm.onclick = () => openServiceDialog(s);
       grid.appendChild(nm);
@@ -3346,7 +3356,7 @@
       const box = el('div', 'f-bl-chips');
       for (const d of openDates) {
         const b = el('button', 'btn', '✓ alle am ' + fmt(parse(d)) + ' erledigt');
-        b.onclick = () => { for (const s of items) for (const t of (s.termine || [])) if (!t.erledigt && t.start === d) svcMarkDone(s, t); kdSave(); ov.remove(); renderService(); };
+        b.onclick = () => { for (const s0 of items) { const s = kdData.find(x => x.id === s0.id) || s0; for (const t of (s.termine || [])) if (!t.erledigt && t.start === d) svcMarkDone(s, t); } kdSave(); ov.remove(); renderService(); };
         box.appendChild(b);
       }
       dlg.appendChild(box);
@@ -3355,7 +3365,7 @@
     const cancel = el('button', 'btn', 'Abbrechen'), ok = el('button', 'btn primary', 'Termin anlegen');
     cancel.onclick = () => ov.remove();
     ok.onclick = () => {
-      const sel = items.filter(s => picks.get(s).checked);
+      const sel = items.filter(s => picks.get(s).checked).map(s => kdData.find(x => x.id === s.id) || s);
       if (!sel.length) { alert('Bitte mindestens eine Anlage auswählen.'); return; }
       if (!von.value) { von.focus(); return; }
       const gid = 'sg' + Date.now().toString(36);
@@ -3368,7 +3378,7 @@
     document.body.appendChild(ov);
   }
   let svcShown = false;
-  ['svcSearch', 'svcBearb', 'svcFilter'].forEach(id => { const e = document.getElementById(id); e.addEventListener(id === 'svcSearch' ? 'input' : 'change', () => renderService()); });
+  ['svcSearch', 'svcFilter'].forEach(id => { const e = document.getElementById(id); e.addEventListener(id === 'svcSearch' ? 'input' : 'change', () => renderService()); });
 
   // ---- Dialog ----
   const soverlay = document.getElementById('soverlay');
@@ -3380,10 +3390,9 @@
     S('sTitle').textContent = s ? 'Wartungsvertrag · ' + svcName(s) : 'Neuer Wartungsvertrag';
     S('s-ort').value = svcDraft.ort || ''; S('s-kunde').value = svcDraft.kunde || ''; S('s-pnr').value = svcDraft.pnr || ''; S('s-vnr').value = svcDraft.vnr || '';
     S('s-intervall').value = String(svcDraft.intervall || 0); S('s-faellig').value = svcDraft.faellig || ''; S('s-preis').value = svcDraft.preis != null && svcDraft.preis !== '' ? String(svcDraft.preis).replace('.', ',') : '';
-    S('s-bearb').value = svcDraft.bearbeiter || ''; S('s-abnahme').value = svcDraft.abnahme || ''; S('s-gewende').value = svcDraft.gewende || ''; S('s-doku').value = svcDraft.doku || '';
+    S('s-abnahme').value = svcDraft.abnahme || ''; S('s-gewende').value = svcDraft.gewende || ''; S('s-doku').value = svcDraft.doku || '';
     S('s-notiz').value = [svcDraft.notiz, svcDraft.faelligText].filter(Boolean).join(' · ');
     S('s-status').value = svcDraft.anfrage || ''; S('s-inaktiv').checked = svcDraft.aktiv === false;
-    const dl = S('svcBearbList'); dl.innerHTML = ''; for (const n of new Set(svcList().map(x => x.bearbeiter).filter(Boolean))) { const o = document.createElement('option'); o.value = n; dl.appendChild(o); }
     S('s-delete').style.display = s ? '' : 'none';
     if (ym && s && !svcDraft.termine.some(t => t.start && t.start.slice(0, 7) === ym)) svcPendingYm = ym; else svcPendingYm = null;
     renderSvcTermine(); renderSvcAngebote(); renderSvcHistory();
@@ -3452,7 +3461,7 @@
     d.pnr = S('s-pnr').value.trim(); d.vnr = S('s-vnr').value.trim(); d.intervall = +S('s-intervall').value || 0;
     d.faellig = S('s-faellig').value || ''; if (d.faellig) delete d.faelligText;
     const pr = S('s-preis').value.trim().replace(/\./g, '').replace(',', '.'); d.preis = pr === '' ? '' : (isNaN(+pr) ? S('s-preis').value.trim() : +pr);
-    d.bearbeiter = S('s-bearb').value.trim(); d.abnahme = S('s-abnahme').value.trim(); d.gewende = S('s-gewende').value.trim(); d.doku = S('s-doku').value.trim();
+    d.abnahme = S('s-abnahme').value.trim(); d.gewende = S('s-gewende').value.trim(); d.doku = S('s-doku').value.trim();
     d.notiz = S('s-notiz').value.trim(); delete d.faelligText;
     d.anfrage = S('s-status').value; d.aktiv = !S('s-inaktiv').checked;
     // neu erledigte Termine → Historie + nächste Fälligkeit nach Intervall
@@ -3466,7 +3475,8 @@
         parts.push('erledigt ' + fmt(parse(t.start)));
       } else if (!was) parts.push('Termin ' + fmt(parse(t.start)) + ((t.wer || []).length ? ' (' + t.wer.map(monteurName).join(', ') + ')' : t.firma ? ' (' + t.firma + ')' : ''));
     }
-    if (curSvc) { Object.keys(curSvc).forEach(k => delete curSvc[k]); Object.assign(curSvc, d); }
+    const target = curSvc && (kdData.find(x => x.id === curSvc.id) || curSvc);
+    if (target) { Object.keys(target).forEach(k => delete target[k]); Object.assign(target, d); if (kdData.indexOf(target) < 0) kdData.push(target); }
     else { d.id = 'sv' + Date.now().toString(36); svcList().push(d); }
     kdSave();
     closeServiceDialog(); render();
@@ -3563,7 +3573,7 @@
     if (fromWeek) { scrollTodayPending = false; requestAnimationFrame(() => scrollToWeek(selMonday)); }
   }
   document.getElementById('viewTimeline').onclick = () => setView('timeline');
-  document.getElementById('viewService').onclick = () => setView('service');
+  document.getElementById('viewService').onclick = () => { setView('service'); kdSync(false).catch(() => {}); };   // beim Öffnen Stand der anderen holen
   document.getElementById('viewWeek').onclick = () => setView('week');
   document.getElementById('wkPrev').onclick = () => { selMonday = addDays(selMonday, -7); renderWeek(); };
   document.getElementById('wkNext').onclick = () => { selMonday = addDays(selMonday, 7); renderWeek(); };
