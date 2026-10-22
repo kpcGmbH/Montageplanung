@@ -3095,6 +3095,7 @@
     try {
       if (window.Cloud && Cloud.isReady()) { const f = await Cloud.loadFile(KD_FOLDER, KD_FILE); kdData = (f && Array.isArray(f.service)) ? f.service : []; }
       else kdData = JSON.parse(localStorage.getItem(KD_LOCAL) || '[]');
+      if (kdData.map(svcNormalize).some(Boolean)) kdSave();   // Stand/aktiv einmalig aus den Notizen ableiten
     } catch (e) { toast('Kundendienst: Laden fehlgeschlagen – ' + (e && e.message || e)); }
     render();
   }
@@ -3123,72 +3124,248 @@
     return 'ok';
   }
 
+  const S = (id) => document.getElementById(id);
+  // ---- Status, aktiv, Lücken, Gruppen ----
+  // Bearbeitungsstand vor dem Termin (s.anfrage): '' (offen) → anfragen → angefragt → beauftragt; ein offener Termin = terminiert.
+  const SVC_ST = { offen: 'offen', anfragen: 'anfragen', angefragt: 'angefragt', beauftragt: 'beauftragt', terminiert: 'terminiert' };
+  const SVC_INACTIVE = /gekünd|beendet|abgelehnt|kein auftrag/i;
+  function svcNormalize(s) {   // nach dem Import einmalig: Stand und aktiv aus dem Freitext ableiten
+    let ch = false;
+    if (s.anfrage === undefined) { const n = (s.notiz || '').toLowerCase(); s.anfrage = /beauftragt/.test(n) ? 'beauftragt' : /angefragt/.test(n) ? 'angefragt' : /anfragen/.test(n) ? 'anfragen' : ''; ch = true; }
+    if (s.aktiv === undefined) { s.aktiv = !SVC_INACTIVE.test(s.faelligText || ''); ch = true; }
+    return ch;
+  }
+  const svcStatus = (s) => (s.termine || []).some(t => !t.erledigt && t.start) ? 'terminiert' : (s.anfrage || 'offen');
+  const svcGaps = (s) => { const g = []; if (!s.intervall) g.push('Intervall'); if (!s.faellig) g.push('nächste Wartung'); return g; };
+  const svcLast = (s) => (s.history || []).map(h => h.date).filter(Boolean).sort().pop() || '';
+  const shortDate = (iso) => iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.' + iso.slice(2, 4) : '';
+  const svcGroupKey = (s) => (s.ort || '').trim().toLowerCase() + '|' + (s.pnr ? 'p' + String(s.pnr).trim() : 'k' + (s.kunde || '').trim().toLowerCase());
+  function svcGroupLabel(items) {
+    if (items.length === 1) return svcName(items[0]);
+    const names = items.map(s => s.kunde || '');
+    let p = names[0]; for (const n of names) { let i = 0; while (i < p.length && i < n.length && p[i] === n[i]) i++; p = p.slice(0, i); }
+    p = p.replace(/[\s\-–(:,]+$/, '').trim();
+    if (p.length < 4) p = names[0].split(/\s[-–]\s|\s\(/)[0];
+    return p + (items[0].ort ? ' (' + items[0].ort + ')' : '');
+  }
+  const SVC_RANK = { over: 0, soon: 1, none: 2, planned: 3, ok: 4 };
+  const worst = (items) => items.map(svcState).sort((a, b) => SVC_RANK[a] - SVC_RANK[b])[0];
+  // Termin erledigt: Historie, nächste Fälligkeit nach Intervall, Stand zurück auf offen
+  function svcMarkDone(d, t) {
+    t.erledigt = true;
+    if (!(d.history || []).some(h => h.date === t.start)) (d.history = d.history || []).push({ date: t.start, text: (t.wer || []).map(monteurName).join(', ') || t.firma || '' });
+    if (d.intervall) { const nx = ymAdd(t.start.slice(0, 7), Math.round(12 / d.intervall)); if (!d.faellig || d.faellig <= nx) d.faellig = nx; }
+    d.anfrage = '';
+  }
+  const KD_OPEN_KEY = 'montageplanung_kd_open', KD_TODO_KEY = 'montageplanung_kd_todo';
+  const kdOpen = new Set((() => { try { return JSON.parse(localStorage.getItem(KD_OPEN_KEY)) || []; } catch (e) { return []; } })());
+  let kdTodoOpen = (() => { try { return localStorage.getItem(KD_TODO_KEY) !== '0'; } catch (e) { return true; } })();
+
   // ---- Ansicht ----
   let svcMonthStart = null;
   function renderService() {
     const now = ymOf(todayMs());
     if (!svcMonthStart) svcMonthStart = ymAdd(now, -2);
     const months = []; for (let i = 0; i < 16; i++) months.push(ymAdd(svcMonthStart, i));
-    // Filter
-    const q = (document.getElementById('svcSearch').value || '').trim().toLowerCase();
-    const bearb = document.getElementById('svcBearb').value, flt = document.getElementById('svcFilter').value;
-    const bsel = document.getElementById('svcBearb'), names = [...new Set(svcList().map(s => (s.bearbeiter || '').trim()).filter(Boolean))].sort();
+    const q = (S('svcSearch').value || '').trim().toLowerCase();
+    const bearb = S('svcBearb').value, flt = S('svcFilter').value;
+    const bsel = S('svcBearb'), names = [...new Set(svcList().map(s => (s.bearbeiter || '').trim()).filter(Boolean))].sort();
     if (bsel.options.length - 1 !== names.length) { const cur = bsel.value; bsel.innerHTML = '<option value="">alle Bearbeiter</option>'; for (const n of names) { const o = el('option', null, n); o.value = n; bsel.appendChild(o); } bsel.value = cur; }
-    const list = svcList().filter(s => {
+    const base = svcList().filter(s => {
       if (q && !((s.kunde || '') + ' ' + (s.ort || '') + ' ' + (s.pnr || '')).toLowerCase().includes(q)) return false;
       if (bearb && (s.bearbeiter || '').trim() !== bearb) return false;
+      return flt === 'inactive' ? s.aktiv === false : s.aktiv !== false;
+    });
+    const isTodo = (s) => { const st = svcState(s); return (st === 'over' || st === 'soon'); };
+    const list = base.filter(s => {
       const st = svcState(s);
-      if (flt === 'due' && !(st === 'over' || st === 'soon')) return false;
-      if (flt === 'planned' && st !== 'planned') return false;
-      if (flt === 'open' && st === 'planned') return false;
+      if (flt === 'todo' || flt === 'due') return isTodo(s);
+      if (flt === 'planned') return st === 'planned';
+      if (flt === 'open') return st !== 'planned';
+      if (flt === 'gaps') return svcGaps(s).length > 0;
+      if (flt.startsWith('st:')) return svcStatus(s) === flt.slice(3);
       return true;
-    }).sort((a, b) => (a.ort || '').localeCompare(b.ort || '', 'de') || (a.kunde || '').localeCompare(b.kunde || '', 'de'));
+    });
+    const wrap = el('div', 'svc-wrap');
+    // Arbeitsliste: fällig/überfällig ohne Termin, älteste zuerst
+    const todo = base.filter(isTodo).sort((a, b) => (a.faellig || '').localeCompare(b.faellig || '') || svcName(a).localeCompare(svcName(b), 'de'));
+    const panel = el('div', 'svc-todo' + (kdTodoOpen ? '' : ' closed'));
+    const ph = el('div', 'svc-todo-head');
+    ph.appendChild(el('span', 'wk-sep-arrow', kdTodoOpen ? '▾' : '▸'));
+    ph.appendChild(el('b', null, 'Zu tun (' + todo.length + ')'));
+    ph.appendChild(el('span', 'svc-todo-sub', 'überfällig oder bald fällig – noch ohne Termin'));
+    ph.onclick = () => { kdTodoOpen = !kdTodoOpen; try { localStorage.setItem(KD_TODO_KEY, kdTodoOpen ? '1' : '0'); } catch (e) {} renderService(); };
+    panel.appendChild(ph);
+    if (kdTodoOpen) {
+      const ul = el('div', 'svc-todo-list');
+      if (!todo.length) ul.appendChild(el('div', 'phase-hint', 'Nichts offen. 👍'));
+      for (const s of todo) {
+        const it = el('div', 'svc-todo-item');
+        it.appendChild(el('span', 'sv-dot sv-' + svcState(s)));
+        it.appendChild(el('span', 'svc-todo-name', svcName(s)));
+        it.appendChild(el('span', 'svc-todo-due', s.faellig ? (s.faellig < now ? 'seit ' : '') + ymLabel(s.faellig) : ''));
+        const stb = el('span', 'svc-st st-' + svcStatus(s), SVC_ST[svcStatus(s)]); it.appendChild(stb);
+        if (s.bearbeiter) it.appendChild(el('span', 'svc-bearb', s.bearbeiter));
+        it.onclick = () => openServiceDialog(s);
+        ul.appendChild(it);
+      }
+      panel.appendChild(ul);
+    }
+    wrap.appendChild(panel);
+
     const grid = el('div', 'svcgrid');
-    grid.style.gridTemplateColumns = '320px 74px repeat(' + months.length + ', minmax(62px, 1fr))';
-    const corner = el('div', 'wk-corner'); corner.textContent = list.length + ' Verträge'; grid.appendChild(corner);
-    grid.appendChild(el('div', 'wk-dayhead', 'Intervall'));
-    months.forEach(ym => {
-      const h = el('div', 'wk-dayhead' + (ym === now ? ' today' : ''), ymLabel(ym));
-      if (ym === months[0]) { const p = el('button', 'svc-nav', '‹'); p.title = 'früher'; p.onclick = () => { svcMonthStart = ymAdd(svcMonthStart, -3); renderService(); }; h.prepend(p); }
-      if (ym === months[months.length - 1]) { const n = el('button', 'svc-nav', '›'); n.title = 'später'; n.onclick = () => { svcMonthStart = ymAdd(svcMonthStart, 3); renderService(); }; h.appendChild(n); }
+    grid.style.gridTemplateColumns = '300px 96px 74px 74px repeat(' + months.length + ', minmax(62px, 1fr))';
+    grid.appendChild(el('div', 'wk-corner', list.length + ' Anlagen'));
+    ['Stand', 'Letzte', 'Nächste'].forEach(t => grid.appendChild(el('div', 'wk-dayhead svc-colhead', t)));
+    months.forEach((ym, i) => {
+      const h = el('div', 'wk-dayhead' + (ym === now ? ' today' : ''));
+      const due = list.filter(s => s.faellig === ym).length, pl = list.reduce((n, s) => n + (s.termine || []).filter(t => !t.erledigt && t.start && t.start.slice(0, 7) === ym).length, 0);
+      h.appendChild(el('div', null, ymLabel(ym)));
+      h.appendChild(el('div', 'svc-mcount', (due ? due + ' fällig' : '') + (due && pl ? ' · ' : '') + (pl ? pl + ' Term.' : '')));
+      if (i === 0) { const p = el('button', 'svc-nav', '‹'); p.title = 'früher'; p.onclick = () => { svcMonthStart = ymAdd(svcMonthStart, -3); renderService(); }; h.prepend(p); }
+      if (i === months.length - 1) { const n = el('button', 'svc-nav', '›'); n.title = 'später'; n.onclick = () => { svcMonthStart = ymAdd(svcMonthStart, 3); renderService(); }; h.appendChild(n); }
       grid.appendChild(h);
     });
-    if (!svcList().length) {
-      const e = el('div', 'svc-empty', 'Noch keine Wartungsverträge. Über „Excel importieren" die bestehende Wartungsliste übernehmen oder mit „+ Vertrag" anlegen.');
-      e.style.gridColumn = '1 / -1'; grid.appendChild(e);
-    }
-    for (const s of list) {
-      const st = svcState(s);
-      const nm = el('div', 'wk-name svc-name');
+    if (!svcList().length) { const e = el('div', 'svc-empty', 'Noch keine Wartungen. Über „Excel importieren" die bestehende Wartungsliste übernehmen oder mit „+ Vertrag" anlegen.'); e.style.gridColumn = '1 / -1'; grid.appendChild(e); }
+    // Monatszellen einer Anlage bzw. einer Gruppe (zusammengefasst)
+    const monthCells = (items, isGroup, s0) => months.forEach((ym, i) => {
+      const c = el('div', 'wk-cell svc-cell' + (ym === now ? ' today' : '') + (isGroup ? ' grp' : ''));
+      let done = 0, open = 0, ext = 0, dueN = 0, dueSt = null;
+      for (const s of items) {
+        const st = svcState(s);
+        const terms = (s.termine || []).filter(t => t.start && t.start.slice(0, 7) === ym);
+        if (!isGroup) {
+          (s.history || []).filter(h => h.date && h.date.slice(0, 7) === ym).forEach(h => { const d = el('span', 'sv-done', '✓ ' + h.date.slice(8, 10) + '.'); d.title = 'durchgeführt ' + fmt(parse(h.date)) + (h.text ? ' – ' + h.text : ''); c.appendChild(d); });
+          for (const t of terms) {
+            const who = (t.wer || []).map(monteurName).join(', ') || t.firma || 'noch niemand';
+            const ch = el('span', 'sv-chip' + (t.erledigt ? ' done' : '') + ((t.wer || []).length ? '' : ' ext'), t.start.slice(8, 10) + '.');
+            ch.title = 'Termin ' + fmt(parse(t.start)) + (t.end && t.end !== t.start ? '–' + fmt(parse(t.end)) : '') + ' · ' + who + (t.notiz ? '\n' + t.notiz : '');
+            c.appendChild(ch);
+          }
+          if (i === 0 && s.faellig && s.faellig < ym && st === 'over') { const d = el('span', 'sv-due sv-over'); d.title = 'überfällig seit ' + ymLabel(s.faellig); c.appendChild(d); c.appendChild(el('span', 'sv-since', '« ' + ymLabel(s.faellig))); }
+          if (s.faellig === ym && st !== 'planned') { const d = el('span', 'sv-due sv-' + st); d.title = 'fällig ' + ymLabel(ym); c.appendChild(d); }   // mit offenem Termin ist die Fälligkeit abgedeckt
+        } else {
+          done += (s.history || []).filter(h => h.date && h.date.slice(0, 7) === ym).length;
+          open += terms.filter(t => !t.erledigt && (t.wer || []).length).length; ext += terms.filter(t => !t.erledigt && !(t.wer || []).length).length;
+          if ((s.faellig === ym && st !== 'planned') || (i === 0 && st === 'over' && s.faellig && s.faellig < ym)) { dueN++; if (!dueSt || SVC_RANK[st] < SVC_RANK[dueSt]) dueSt = st; }
+        }
+      }
+      if (isGroup) {
+        if (done) c.appendChild(el('span', 'sv-done', '✓' + (done > 1 ? done : '')));
+        if (open) c.appendChild(el('span', 'sv-chip', open > 1 ? open + '×' : 'T'));
+        if (ext) c.appendChild(el('span', 'sv-chip ext', ext > 1 ? ext + '×' : 'T'));
+        if (dueN) { const d = el('span', 'sv-due sv-' + (dueSt === 'planned' ? 'ok' : dueSt) + (dueN > 1 ? ' n' : ''), dueN > 1 ? String(dueN) : ''); d.title = dueN + ' fällig'; c.appendChild(d); }
+        c.onclick = () => openGroupDialog(items, ym);
+      } else c.onclick = () => openServiceDialog(s0, ym);
+      grid.appendChild(c);
+    });
+    const contractRow = (s, indent) => {
+      const st = svcState(s), gaps = svcGaps(s);
+      const nm = el('div', 'wk-name svc-name' + (indent ? ' sub' : '') + (s.aktiv === false ? ' inactive' : ''));
       nm.appendChild(el('span', 'sv-dot sv-' + st));
-      const tx = el('span', 'wk-person-name'); tx.textContent = svcName(s); nm.appendChild(tx);
+      nm.appendChild(el('span', 'wk-person-name', indent ? (s.kunde || '') : svcName(s)));
+      if (gaps.length) { const w = el('span', 'svc-gap', '⚠'); w.title = 'fehlt: ' + gaps.join(', '); nm.appendChild(w); }
       if (s.bearbeiter) nm.appendChild(el('span', 'svc-bearb', s.bearbeiter));
-      nm.title = svcName(s) + (s.pnr ? '\nPNr ' + s.pnr : '') + (s.faellig ? '\nnächste Wartung: ' + ymLabel(s.faellig) : (s.faelligText ? '\n' + s.faelligText : '')) + (s.notiz ? '\n' + s.notiz : '') + '\nKlick: bearbeiten';
+      nm.title = svcName(s) + (s.pnr ? '\nPNr ' + s.pnr : '') + '\n' + (s.intervall ? s.intervall + '× jährlich' : 'ohne Intervall') + (s.notiz ? '\n' + s.notiz : '') + '\nKlick: bearbeiten';
       nm.onclick = () => openServiceDialog(s);
       grid.appendChild(nm);
-      grid.appendChild(el('div', 'wk-cell svc-iv', s.intervall ? s.intervall + '× / Jahr' : '–'));
-      months.forEach(ym => {
-        const c = el('div', 'wk-cell svc-cell' + (ym === now ? ' today' : ''));
-        const done = (s.history || []).filter(h => h.date && h.date.slice(0, 7) === ym);
-        const terms = (s.termine || []).filter(t => t.start && t.start.slice(0, 7) === ym);
-        for (const h of done) { const d = el('span', 'sv-done', '✓ ' + h.date.slice(8, 10) + '.'); d.title = 'durchgeführt ' + fmt(parse(h.date)) + (h.text ? ' – ' + h.text : ''); c.appendChild(d); }
-        for (const t of terms) {
-          const who = (t.wer || []).map(monteurName).join(', ') || t.firma || 'noch niemand';
-          const ch = el('span', 'sv-chip' + (t.erledigt ? ' done' : '') + ((t.wer || []).length ? '' : ' ext'), t.start.slice(8, 10) + '.');
-          ch.title = 'Termin ' + fmt(parse(t.start)) + (t.end && t.end !== t.start ? '–' + fmt(parse(t.end)) : '') + ' · ' + who + (t.notiz ? '\n' + t.notiz : '');
-          c.appendChild(ch);
-        }
-        if (ym === months[0] && s.faellig && s.faellig < ym && st === 'over') { const d = el('span', 'sv-due sv-over', ''); d.title = 'überfällig seit ' + ymLabel(s.faellig); c.appendChild(d); c.appendChild(el('span', 'sv-since', '« ' + ymLabel(s.faellig))); }
-        if (s.faellig === ym && !terms.some(t => !t.erledigt)) { const d = el('span', 'sv-due sv-' + (st === 'planned' ? 'ok' : st)); d.title = 'fällig ' + ymLabel(ym); c.appendChild(d); }
-        c.onclick = () => openServiceDialog(s, ym);
-        grid.appendChild(c);
-      });
+      grid.appendChild(el('div', 'wk-cell svc-stc', '')).appendChild(el('span', 'svc-st st-' + svcStatus(s), SVC_ST[svcStatus(s)]));
+      grid.appendChild(el('div', 'wk-cell svc-small', shortDate(svcLast(s)) || '–'));
+      const nx = el('div', 'wk-cell svc-small' + (st === 'over' ? ' over' : st === 'soon' ? ' soon' : ''), s.faellig ? ymLabel(s.faellig) : (s.faelligText || '–'));
+      grid.appendChild(nx);
+      monthCells([s], false, s);
+    };
+    // Gruppen: Anlagen desselben Objekts (Ort + PNr) zusammen
+    const groups = new Map();
+    for (const s of list) { const k = svcGroupKey(s); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
+    const glist = [...groups.entries()].map(([k, items]) => ({ k, items, label: svcGroupLabel(items) }))
+      .sort((a, b) => (a.items[0].ort || '').localeCompare(b.items[0].ort || '', 'de') || a.label.localeCompare(b.label, 'de'));
+    for (const g of glist) {
+      if (g.items.length === 1) { contractRow(g.items[0], false); continue; }
+      const open = kdOpen.has(g.k) || !!q;
+      const gst = worst(g.items);
+      const nm = el('div', 'wk-name svc-name grp');
+      nm.appendChild(el('span', 'wk-sep-arrow', open ? '▾' : '▸'));
+      nm.appendChild(el('span', 'sv-dot sv-' + gst));
+      nm.appendChild(el('span', 'wk-person-name', g.label));
+      nm.appendChild(el('span', 'svc-bearb', g.items.length + ' Anlagen'));
+      const add = el('button', 'svc-grp-add', '+ Termin'); add.title = 'Ein Termin für mehrere Anlagen dieses Objekts';
+      add.onclick = (e) => { e.stopPropagation(); openGroupDialog(g.items); };
+      nm.appendChild(add);
+      nm.onclick = () => { if (kdOpen.has(g.k)) kdOpen.delete(g.k); else kdOpen.add(g.k); try { localStorage.setItem(KD_OPEN_KEY, JSON.stringify([...kdOpen])); } catch (e) {} renderService(); };
+      grid.appendChild(nm);
+      const cnt = {}; g.items.forEach(s => { const x = svcStatus(s); cnt[x] = (cnt[x] || 0) + 1; });
+      grid.appendChild(el('div', 'wk-cell svc-small grp', Object.entries(cnt).map(([k2, n]) => n + ' ' + k2).join(' · ')));
+      grid.appendChild(el('div', 'wk-cell svc-small grp', shortDate(g.items.map(svcLast).filter(Boolean).sort().pop()) || '–'));
+      const nxt = g.items.map(s => s.faellig).filter(Boolean).sort()[0];
+      grid.appendChild(el('div', 'wk-cell svc-small grp' + (gst === 'over' ? ' over' : gst === 'soon' ? ' soon' : ''), nxt ? ymLabel(nxt) : '–'));
+      monthCells(g.items, true);
+      if (open) g.items.forEach(s => contractRow(s, true));
     }
-    const sl = svcShown ? viewport.scrollLeft : 0, st = svcShown ? viewport.scrollTop : 0;
+    wrap.appendChild(grid);
+    const sl = svcShown ? viewport.scrollLeft : 0, stp = svcShown ? viewport.scrollTop : 0;
     viewport.innerHTML = '';
-    viewport.appendChild(grid);
-    viewport.scrollLeft = sl; viewport.scrollTop = st;
+    viewport.appendChild(wrap);
+    viewport.scrollLeft = sl; viewport.scrollTop = stp;
     svcShown = true;
+  }
+
+  // ---- Sammeltermin für mehrere Anlagen eines Objekts ----
+  function openGroupDialog(items, ym) {
+    const ov = el('div', 'overlay'), dlg = el('div', 'dialog svc-dialog');
+    dlg.appendChild(el('h3', null, 'Termin für mehrere Anlagen · ' + svcGroupLabel(items)));
+    const listBox = el('div', 'svc-glist'), picks = new Map();
+    for (const s of items) {
+      const st = svcState(s);
+      const lab = el('label', 'w-check');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = st !== 'planned' && s.aktiv !== false; picks.set(s, cb);
+      lab.appendChild(cb); lab.appendChild(el('span', 'sv-dot sv-' + st));
+      lab.appendChild(el('span', null, (s.kunde || '') + (s.faellig ? ' · fällig ' + ymLabel(s.faellig) : '') + ' · ' + SVC_ST[svcStatus(s)]));
+      listBox.appendChild(lab);
+    }
+    dlg.appendChild(el('div', 'assign-title', 'Anlagen')); dlg.appendChild(listBox);
+    const r = el('div', 'phase-row2');
+    let d0 = parse((ym || ymOf(todayMs())) + '-01'); if (ym) { while (!isWorkdayMs(d0)) d0 = addDays(d0, 1); } else d0 = todayMs();
+    const von = document.createElement('input'); von.type = 'date'; von.value = isoStr(d0);
+    const bis = document.createElement('input'); bis.type = 'date'; bis.value = isoStr(d0);
+    von.onchange = () => { if (!bis.value || bis.value < von.value || bis.dataset.touched !== '1') bis.value = von.value; };
+    bis.onchange = () => { bis.dataset.touched = '1'; if (bis.value < von.value) bis.value = von.value; };
+    const firma = document.createElement('input'); firma.type = 'text'; firma.placeholder = 'oder Servicefirma';
+    const L = (t, inp) => { const l = el('label', 'phase-fld', t); l.appendChild(inp); return l; };
+    r.appendChild(L('Von', von)); r.appendChild(L('Bis', bis)); r.appendChild(L('Servicefirma', firma));
+    dlg.appendChild(r);
+    const wer = new Set(), chips = el('div', 'f-bl-chips');
+    const drawChips = () => { chips.innerHTML = ''; for (const m of PLAN.team) { const on = wer.has(m.id), c = el('span', 'trade-chip' + (on ? ' on' : ''), m.name); if (on) c.style.background = '#2f9e8f'; c.onclick = () => { if (on) wer.delete(m.id); else wer.add(m.id); drawChips(); }; chips.appendChild(c); } };
+    drawChips();
+    dlg.appendChild(el('div', 'assign-title', 'Eigene Techniker')); dlg.appendChild(chips);
+    const notiz = document.createElement('input'); notiz.type = 'text'; notiz.placeholder = 'Notiz zum Termin'; notiz.className = 'svc-tnotiz'; dlg.appendChild(notiz);
+    // offene Termine dieses Objekts gemeinsam abhaken
+    const openDates = [...new Set(items.flatMap(s => (s.termine || []).filter(t => !t.erledigt && t.start).map(t => t.start)))].sort();
+    if (openDates.length) {
+      dlg.appendChild(el('div', 'assign-title', 'Offene Termine erledigen'));
+      const box = el('div', 'f-bl-chips');
+      for (const d of openDates) {
+        const b = el('button', 'btn', '✓ alle am ' + fmt(parse(d)) + ' erledigt');
+        b.onclick = () => { for (const s of items) for (const t of (s.termine || [])) if (!t.erledigt && t.start === d) svcMarkDone(s, t); kdSave(); ov.remove(); renderService(); };
+        box.appendChild(b);
+      }
+      dlg.appendChild(box);
+    }
+    const act = el('div', 'dialog-actions');
+    const cancel = el('button', 'btn', 'Abbrechen'), ok = el('button', 'btn primary', 'Termin anlegen');
+    cancel.onclick = () => ov.remove();
+    ok.onclick = () => {
+      const sel = items.filter(s => picks.get(s).checked);
+      if (!sel.length) { alert('Bitte mindestens eine Anlage auswählen.'); return; }
+      if (!von.value) { von.focus(); return; }
+      const gid = 'sg' + Date.now().toString(36);
+      sel.forEach((s, i) => (s.termine = s.termine || []).push({ id: gid + '-' + i, start: von.value, end: bis.value || von.value, wer: [...wer], firma: firma.value.trim(), notiz: notiz.value.trim(), erledigt: false }));
+      kdSave(); ov.remove(); renderService();
+    };
+    act.appendChild(el('div', 'spacer')); act.appendChild(cancel); act.appendChild(ok);
+    dlg.appendChild(act); ov.appendChild(dlg);
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
   }
   let svcShown = false;
   ['svcSearch', 'svcBearb', 'svcFilter'].forEach(id => { const e = document.getElementById(id); e.addEventListener(id === 'svcSearch' ? 'input' : 'change', () => renderService()); });
@@ -3196,7 +3373,6 @@
   // ---- Dialog ----
   const soverlay = document.getElementById('soverlay');
   let curSvc = null, svcDraft = null;
-  const S = (id) => document.getElementById(id);
   function openServiceDialog(s, ym) {
     curSvc = s || null;
     svcDraft = JSON.parse(JSON.stringify(s || { ort: '', kunde: '', intervall: 1, history: [], angebote: [], termine: [] }));
@@ -3206,6 +3382,7 @@
     S('s-intervall').value = String(svcDraft.intervall || 0); S('s-faellig').value = svcDraft.faellig || ''; S('s-preis').value = svcDraft.preis != null && svcDraft.preis !== '' ? String(svcDraft.preis).replace('.', ',') : '';
     S('s-bearb').value = svcDraft.bearbeiter || ''; S('s-abnahme').value = svcDraft.abnahme || ''; S('s-gewende').value = svcDraft.gewende || ''; S('s-doku').value = svcDraft.doku || '';
     S('s-notiz').value = [svcDraft.notiz, svcDraft.faelligText].filter(Boolean).join(' · ');
+    S('s-status').value = svcDraft.anfrage || ''; S('s-inaktiv').checked = svcDraft.aktiv === false;
     const dl = S('svcBearbList'); dl.innerHTML = ''; for (const n of new Set(svcList().map(x => x.bearbeiter).filter(Boolean))) { const o = document.createElement('option'); o.value = n; dl.appendChild(o); }
     S('s-delete').style.display = s ? '' : 'none';
     if (ym && s && !svcDraft.termine.some(t => t.start && t.start.slice(0, 7) === ym)) svcPendingYm = ym; else svcPendingYm = null;
@@ -3277,6 +3454,7 @@
     const pr = S('s-preis').value.trim().replace(/\./g, '').replace(',', '.'); d.preis = pr === '' ? '' : (isNaN(+pr) ? S('s-preis').value.trim() : +pr);
     d.bearbeiter = S('s-bearb').value.trim(); d.abnahme = S('s-abnahme').value.trim(); d.gewende = S('s-gewende').value.trim(); d.doku = S('s-doku').value.trim();
     d.notiz = S('s-notiz').value.trim(); delete d.faelligText;
+    d.anfrage = S('s-status').value; d.aktiv = !S('s-inaktiv').checked;
     // neu erledigte Termine → Historie + nächste Fälligkeit nach Intervall
     const before = curSvc ? (curSvc.termine || []) : [];
     const parts = [];
@@ -3284,8 +3462,7 @@
       if (!t.start) continue;
       const was = before.find(b => b.id === t.id);
       if (t.erledigt && !(was && was.erledigt)) {
-        if (!d.history.some(h => h.date === t.start)) d.history.push({ date: t.start, text: (t.wer || []).map(monteurName).join(', ') || t.firma || '' });
-        if (d.intervall) { const nx = ymAdd(t.start.slice(0, 7), Math.round(12 / d.intervall)); if (!d.faellig || d.faellig <= nx) d.faellig = nx; }
+        svcMarkDone(d, t);
         parts.push('erledigt ' + fmt(parse(t.start)));
       } else if (!was) parts.push('Termin ' + fmt(parse(t.start)) + ((t.wer || []).length ? ' (' + t.wer.map(monteurName).join(', ') + ')' : t.firma ? ' (' + t.firma + ')' : ''));
     }
@@ -3362,7 +3539,7 @@
       const key = (s) => (s.kunde + '|' + s.ort).toLowerCase().replace(/\s+/g, ' ').trim();
       const have = new Set(svcList().map(key)), add = rows.filter(s => !have.has(key(s)));
       if (!confirm(rows.length + ' Verträge in der Liste gefunden, davon ' + add.length + ' neu.\nJetzt übernehmen?')) return;
-      svcList().push(...add); kdSave();
+      add.forEach(svcNormalize); svcList().push(...add); kdSave();
       toast(add.length + ' Wartungsverträge übernommen');
       render();
     } catch (e) { alert('Import fehlgeschlagen: ' + (e && e.message || e)); }

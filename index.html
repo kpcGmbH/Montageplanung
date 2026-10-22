@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=122">
+  <link rel="stylesheet" href="styles.css?v=123">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -60,10 +60,15 @@
       <input id="svcSearch" class="search" type="search" placeholder="Kunde / Ort suchen…">
       <select id="svcBearb" title="Bearbeiter"><option value="">alle Bearbeiter</option></select>
       <select id="svcFilter" title="Anzeigen">
-        <option value="">alle Verträge</option>
+        <option value="">alle aktiven</option>
         <option value="due">fällig / überfällig</option>
         <option value="planned">mit geplantem Termin</option>
         <option value="open">ohne Termin</option>
+        <option value="st:anfragen">Stand: anfragen</option>
+        <option value="st:angefragt">Stand: angefragt</option>
+        <option value="st:beauftragt">Stand: beauftragt</option>
+        <option value="gaps">⚠ Angaben fehlen</option>
+        <option value="inactive">beendete / inaktive</option>
       </select>
       <span class="svc-legend"><i class="sv-dot sv-over"></i>überfällig <i class="sv-dot sv-soon"></i>bald fällig <i class="sv-dot sv-ok"></i>fällig später <i class="sv-chip-l">Termin</i> <i class="sv-done-l">✓ erledigt</i></span>
       <span class="spacer"></span>
@@ -301,6 +306,12 @@
         <label>Abnahme / Gewährleistungsbeginn <input id="s-abnahme" type="text"></label>
         <label>Gewährleistungsende <input id="s-gewende" type="text"></label>
       </div>
+      <div class="row2">
+        <label>Stand
+          <select id="s-status"><option value="">offen</option><option value="anfragen">anfragen</option><option value="angefragt">angefragt</option><option value="beauftragt">beauftragt</option></select>
+        </label>
+        <label class="w-check" style="align-self:flex-end"><input id="s-inaktiv" type="checkbox"> Vertrag beendet / inaktiv</label>
+      </div>
       <label>Link zur Dokumentation <input id="s-doku" type="text" placeholder="https://…"></label>
       <label>Notiz / Stand <input id="s-notiz" type="text" placeholder="z. B. angefragt, Preis+Termin offen"></label>
       <fieldset class="crew">
@@ -348,8 +359,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=122"></script>
-  <script src="cloud.js?v=122"></script>
-  <script src="app.js?v=122"></script>
+  <script src="data.js?v=123"></script>
+  <script src="cloud.js?v=123"></script>
+  <script src="app.js?v=123"></script>
 </body>
 </html>

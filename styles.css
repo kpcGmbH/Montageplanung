@@ -740,3 +740,33 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .w-svc { display: flex; flex-direction: column; gap: 6px; }
 .w-svc-btn { text-align: left; background: #e2f3f0; border-color: #9fd3c9; }
 .sv-since { font-size: 9.5px; color: #a12b1e; }
+
+/* Kundendienst: Arbeitsliste, Stand, Gruppen */
+.svc-wrap { min-width: max-content; }
+.svc-todo { position: sticky; left: 0; width: min(100%, 980px); box-sizing: border-box; margin: 8px 10px; border: 1px solid #f0d48a; background: #fffaf0; border-radius: 8px; }
+.svc-todo-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; font-size: 13px; }
+.svc-todo-sub { font-size: 11px; color: #7b8188; }
+.svc-todo-list { max-height: 210px; overflow: auto; border-top: 1px solid #f3e2b4; }
+.svc-todo-item { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; border-bottom: 1px solid #f6ecd2; }
+.svc-todo-item:hover { background: #fff3d6; }
+.svc-todo-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-todo-due { flex: 0 0 auto; color: #a12b1e; font-weight: 600; font-size: 11px; }
+.svc-st { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 8px; background: #eef0f3; color: #4a5057; white-space: nowrap; }
+.svc-st.st-anfragen { background: #fde9d2; color: #8a4a08; }
+.svc-st.st-angefragt { background: #fff2b8; color: #6b5300; }
+.svc-st.st-beauftragt { background: #e2f0d6; color: #33600f; }
+.svc-st.st-terminiert { background: #dce8f7; color: #1f4f86; }
+.svc-colhead { font-size: 11px; }
+.svc-mcount { font-size: 9.5px; font-weight: 500; color: #7b8188; }
+.wk-cell.svc-small { font-size: 11px; color: #5b6168; justify-content: center; cursor: default; }
+.wk-cell.svc-small.over { color: #a12b1e; font-weight: 700; }
+.wk-cell.svc-small.soon { color: #8a6a00; font-weight: 700; }
+.wk-cell.svc-stc { justify-content: center; cursor: default; }
+.wk-name.svc-name.grp { background: #f2f5f7; font-weight: 600; }
+.wk-cell.grp { background: #f8fafb; }
+.wk-name.svc-name.sub { padding-left: 26px; font-size: 11.5px; }
+.wk-name.svc-name.inactive { color: #9aa0a6; text-decoration: line-through; }
+.svc-gap { color: #c46a14; font-size: 12px; }
+.svc-grp-add { flex: 0 0 auto; border: 1px solid var(--line-strong); background: #fff; border-radius: 6px; font-size: 10.5px; padding: 1px 6px; cursor: pointer; }
+.sv-due.n { width: auto; min-width: 16px; height: 16px; border-radius: 8px; font-size: 9.5px; font-weight: 700; color: #fff; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; }
+.svc-glist { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
