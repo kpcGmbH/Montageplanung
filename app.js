@@ -44,7 +44,7 @@
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
     const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, ti: r.ti, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
-    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), nights: (PLAN.nights || {}), service: (PLAN.service || []), changelog: (PLAN.changelog || []) };
+    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), nights: (PLAN.nights || {}), changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
     if (data && Array.isArray(data.groups) && data.groups.length) PLAN.groups = data.groups;
@@ -56,7 +56,6 @@
     for (const v of (PLAN.vehicles || [])) if (v.name === 'KP-190') v.name = 'KP-170';   // Korrektur: das Fahrzeug heißt KP-170 (ID bleibt, damit Zuordnungen gelten)
     if (data && data.cars && typeof data.cars === 'object') PLAN.cars = data.cars; else PLAN.cars = PLAN.cars || {};
     if (data && data.nights && typeof data.nights === 'object') PLAN.nights = data.nights; else PLAN.nights = PLAN.nights || {};
-    if (data && Array.isArray(data.service)) PLAN.service = data.service; else PLAN.service = PLAN.service || [];
     // Changelog (Änderungsverlauf) – geteilt über den 3-Wege-Merge (Array-Vereinigung über id)
     if (data && Array.isArray(data.changelog)) PLAN.changelog = data.changelog;
     else PLAN.changelog = PLAN.changelog || [];
@@ -71,6 +70,7 @@
   // „frei" bei zwei Monteuren weg, im Verlauf stand nur „Änderung rückgängig gemacht").
   const undoStack = [], redoStack = [], MAX_HIST = 80;
   let histPrev = null, suppressHistory = false, batchDepth = 0;
+  let kdData = [];   // Kundendienst-Verträge (eigene Datei, nur für freigegebene Logins)
   function updateUndoUI() {
     const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
     if (u) u.disabled = undoStack.length === 0;
@@ -633,7 +633,9 @@
     for (const k of Object.keys(assignments)) if (k.startsWith(pre)) delete assignments[k];
     for (const k of Object.keys(PLAN.cars || {})) if (k.startsWith(pre)) delete PLAN.cars[k];
     for (const k of Object.keys(PLAN.nights || {})) if (k.startsWith(pre)) delete PLAN.nights[k];
-    for (const sv of (PLAN.service || [])) for (const t of (sv.termine || [])) if ((t.wer || []).includes(id)) t.wer = t.wer.filter(x => x !== id);
+    let kdChanged = false;
+    for (const sv of kdData) for (const t of (sv.termine || [])) if ((t.wer || []).includes(id)) { t.wer = t.wer.filter(x => x !== id); kdChanged = true; }
+    if (kdChanged) kdSave();
     return n;
   }
   const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows.filter(r => !r.archived) : []; };
@@ -3065,7 +3067,36 @@
   //   preis, bearbeiter, abnahme, gewende, doku, notiz, history:[{date,text}], angebote:[{firma,datum,preis}],
   //   termine:[{id,start,end,wer:[personIds],firma,notiz,erledigt}] }]
   // Termine mit eigenen Technikern laufen in der Woche bei der Person zusammen (Typ Kundendienst).
-  const svcList = () => (PLAN.service = PLAN.service || []);
+  // Freigabe: die Ansicht gibt es vorerst nur für diese Logins. Die Daten liegen NICHT im gemeinsamen Plan,
+  // sondern in einer eigenen Datei der Site (Kundendienst/wartungsvertraege.json) und werden nur hier geladen.
+  const KD_USERS = ['johannes.wahl@kpc-project.com'];
+  const KD_FOLDER = 'Kundendienst', KD_FILE = 'wartungsvertraege.json', KD_LOCAL = 'montageplanung_kundendienst';
+  const kdLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);   // lokale Entwicklung ohne Anmeldung
+  function kdAllowed() {
+    if (window.Cloud && Cloud.isReady()) { const a = String(Cloud.account() || '').toLowerCase(); return KD_USERS.includes(a); }
+    return kdLocalDev;
+  }
+  const svcList = () => kdData;
+  let kdSaveTimer = null;
+  function kdSave() {
+    clearTimeout(kdSaveTimer);
+    kdSaveTimer = setTimeout(async () => {
+      if (window.Cloud && Cloud.isReady()) {
+        try { await Cloud.saveFile(KD_FOLDER, KD_FILE, { version: 1, updated: new Date().toISOString(), by: Cloud.account(), service: kdData }); }
+        catch (e) { toast('Kundendienst: Speichern fehlgeschlagen – ' + (e && e.message || e)); }
+      } else { try { localStorage.setItem(KD_LOCAL, JSON.stringify(kdData)); } catch (e) {} }
+    }, 600);
+  }
+  async function kdInit() {
+    const ok = kdAllowed();
+    document.getElementById('viewService').hidden = !ok;
+    if (!ok) { kdData = []; if (viewMode === 'service') setView('timeline'); return; }
+    try {
+      if (window.Cloud && Cloud.isReady()) { const f = await Cloud.loadFile(KD_FOLDER, KD_FILE); kdData = (f && Array.isArray(f.service)) ? f.service : []; }
+      else kdData = JSON.parse(localStorage.getItem(KD_LOCAL) || '[]');
+    } catch (e) { toast('Kundendienst: Laden fehlgeschlagen – ' + (e && e.message || e)); }
+    render();
+  }
   const ymOf = (ms) => isoStr(ms).slice(0, 7);
   const ymAdd = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return isoStr(d.getTime()).slice(0, 7); };
   const SVC_MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
@@ -3257,17 +3288,15 @@
         parts.push('erledigt ' + fmt(parse(t.start)));
       } else if (!was) parts.push('Termin ' + fmt(parse(t.start)) + ((t.wer || []).length ? ' (' + t.wer.map(monteurName).join(', ') + ')' : t.firma ? ' (' + t.firma + ')' : ''));
     }
-    historyBatch(() => {
-      if (curSvc) { Object.keys(curSvc).forEach(k => delete curSvc[k]); Object.assign(curSvc, d); }
-      else { d.id = 'sv' + Date.now().toString(36); svcList().push(d); }
-      logChange(`Kundendienst „${svcName(d)}" ${curSvc ? 'bearbeitet' : 'angelegt'}${parts.length ? ' · ' + parts.join(' · ') : ''}${d.faellig ? ' · nächste Wartung ' + ymLabel(d.faellig) : ''}`, 'kundendienst');
-    });
+    if (curSvc) { Object.keys(curSvc).forEach(k => delete curSvc[k]); Object.assign(curSvc, d); }
+    else { d.id = 'sv' + Date.now().toString(36); svcList().push(d); }
+    kdSave();
     closeServiceDialog(); render();
   };
   S('s-delete').onclick = () => {
     if (!curSvc || !confirm(`Wartungsvertrag „${svcName(curSvc)}" löschen?`)) return;
     const s = curSvc;
-    historyBatch(() => { PLAN.service = svcList().filter(x => x !== s); logChange(`Kundendienst „${svcName(s)}" gelöscht`, 'kundendienst'); });
+    kdData = kdData.filter(x => x !== s); kdSave();
     closeServiceDialog(); render();
   };
   S('svcAdd').onclick = () => openServiceDialog(null);
@@ -3332,7 +3361,7 @@
       const key = (s) => (s.kunde + '|' + s.ort).toLowerCase().replace(/\s+/g, ' ').trim();
       const have = new Set(svcList().map(key)), add = rows.filter(s => !have.has(key(s)));
       if (!confirm(rows.length + ' Verträge in der Liste gefunden, davon ' + add.length + ' neu.\nJetzt übernehmen?')) return;
-      historyBatch(() => { svcList().push(...add); logChange(`Kundendienst: ${add.length} Wartungsverträge aus Excel übernommen (${f.name})`, 'kundendienst'); });
+      svcList().push(...add); kdSave();
       toast(add.length + ' Wartungsverträge übernommen');
       render();
     } catch (e) { alert('Import fehlgeschlagen: ' + (e && e.message || e)); }
@@ -3714,8 +3743,9 @@
     // Solange ein Dialog/die Termineinladung offen ist, nicht abgleichen – die Maske hält Verweise auf die Daten
     Cloud.onCanSync(() => !['overlay', 'poverlay', 'roverlay', 'moverlay', 'bloverlay', 'woverlay', 'soverlay'].some(id => { const o = document.getElementById(id); return o && !o.hidden; }) && (!tiView || tiView.hidden));
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
-    Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
+    Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); kdInit(); });
   } else {
     revealApp(); // ohne Cloud-Modul kein Gate möglich
+    kdInit();
   }
 })();
