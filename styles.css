@@ -707,3 +707,36 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 /* Hinweis auf neue Version */
 .update-banner { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 9000; display: flex; align-items: center; gap: 12px;
   background: #fff; border: 1px solid var(--copper); border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 28px rgba(0,0,0,.22); font-size: 13px; color: var(--ink); max-width: calc(100vw - 32px); }
+
+/* ===== Kundendienst ===== */
+.svcbar { flex-wrap: wrap; gap: 8px; }
+.svcbar select, .svcbar .search { height: 30px; }
+.svc-legend { font-size: 11px; color: #5b6168; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.svc-legend i { font-style: normal; }
+.svcgrid { display: grid; min-width: max-content; }
+.svcgrid .wk-dayhead { text-align: center; position: sticky; top: 0; z-index: 20; }
+.svc-nav { border: none; background: transparent; cursor: pointer; font-weight: 700; color: var(--copper-dark); padding: 0 4px; }
+.wk-name.svc-name { gap: 6px; cursor: pointer; font-size: 12px; }
+.wk-name.svc-name:hover { background: #f4f7f8; }
+.svc-bearb { flex: 0 0 auto; font-size: 10px; color: #7b8188; background: #f0f2f4; border-radius: 6px; padding: 1px 6px; }
+.wk-cell.svc-iv { font-size: 10.5px; color: #7b8188; justify-content: center; cursor: default; }
+.wk-cell.svc-cell { justify-content: center; gap: 3px; flex-wrap: wrap; padding: 3px; min-height: 30px; }
+.wk-cell.svc-cell.today { background: #fdf8f1; }
+.sv-dot, .sv-due { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.sv-due { width: 14px; height: 14px; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.18); }
+.sv-over { background: #e0402e; } .sv-soon { background: #f0c419; } .sv-ok { background: #79b941; } .sv-none { background: #c9ced3; } .sv-planned { background: #3d7ec9; }
+.sv-chip, .sv-chip-l { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px; background: #3d7ec9; color: #fff; }
+.sv-chip.ext { background: #8f77c4; }
+.sv-chip.done { background: #c9ced3; color: #4a5057; }
+.sv-done, .sv-done-l { font-size: 10.5px; color: #4f7f2a; font-weight: 600; }
+.svc-empty { padding: 24px; color: #5b6168; font-size: 13px; }
+.dialog.svc-dialog { width: 640px; }
+.svc-termin { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
+.svc-termin.done { background: #f4f6f2; }
+.svc-tnotiz { width: 100%; box-sizing: border-box; }
+.svc-history { display: flex; flex-direction: column; gap: 3px; max-height: 160px; overflow: auto; font-size: 12px; }
+.svc-hrow { padding: 2px 4px; border-bottom: 1px dashed var(--line); }
+.hist-badge.hb-kundendienst { background: #e2f3f0; color: #24796d; }
+.w-svc { display: flex; flex-direction: column; gap: 6px; }
+.w-svc-btn { text-align: left; background: #e2f3f0; border-color: #9fd3c9; }
+.sv-since { font-size: 9.5px; color: #a12b1e; }

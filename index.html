@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montageplanung – Zeitplan</title>
-  <link rel="stylesheet" href="styles.css?v=119">
+  <link rel="stylesheet" href="styles.css?v=120">
 </head>
 <body>
   <!-- Login-Gate: App erst nach Microsoft-Anmeldung sichtbar (keine Demodaten) -->
@@ -24,6 +24,7 @@
       <div class="btn-group view-toggle">
         <button id="viewTimeline" class="btn active" title="Zeitplan &amp; Auslastung">Zeitplan</button>
         <button id="viewWeek" class="btn" title="Wochen-Einsatzplan">Woche</button>
+        <button id="viewService" class="btn" title="Kundendienst: Wartungsverträge, Fälligkeiten und Termine">Kundendienst</button>
       </div>
       <div class="btn-group">
         <button id="undoBtn" class="btn" title="Rückgängig (Strg+Z)" disabled>↶ Rückgängig</button>
@@ -55,6 +56,21 @@
       <div id="loginNoticeErr" class="login-err" hidden></div>
     </div>
     <div class="hint" id="hint">Doppelklick auf eine leere Zeile = neuer Termin &nbsp;·&nbsp; Balken ziehen = verschieben &nbsp;·&nbsp; Ränder ziehen = Dauer ändern &nbsp;·&nbsp; Klick = bearbeiten</div>
+    <div class="weekbar svcbar" id="svcbar" hidden>
+      <input id="svcSearch" class="search" type="search" placeholder="Kunde / Ort suchen…">
+      <select id="svcBearb" title="Bearbeiter"><option value="">alle Bearbeiter</option></select>
+      <select id="svcFilter" title="Anzeigen">
+        <option value="">alle Verträge</option>
+        <option value="due">fällig / überfällig</option>
+        <option value="planned">mit geplantem Termin</option>
+        <option value="open">ohne Termin</option>
+      </select>
+      <span class="svc-legend"><i class="sv-dot sv-over"></i>überfällig <i class="sv-dot sv-soon"></i>bald fällig <i class="sv-dot sv-ok"></i>fällig später <i class="sv-chip-l">Termin</i> <i class="sv-done-l">✓ erledigt</i></span>
+      <span class="spacer"></span>
+      <button id="svcAdd" class="btn">+ Vertrag</button>
+      <button id="svcImport" class="btn" title="Wartungsliste (Excel) einmalig übernehmen">Excel importieren</button>
+      <input id="svcFile" type="file" accept=".xls,.xlsx" hidden>
+    </div>
     <div class="weekbar" id="weekbar" hidden>
       <div class="btn-group">
         <button id="wkPrev" class="btn" title="Vorige Woche">‹</button>
@@ -260,6 +276,57 @@
   </div>
 
   <!-- Änderungsverlauf (wer / was / wann) – geteilt über SharePoint -->
+  <!-- Kundendienst: Wartungsvertrag -->
+  <div id="soverlay" class="overlay" hidden>
+    <div class="dialog svc-dialog" role="dialog" aria-modal="true">
+      <h3 id="sTitle">Wartungsvertrag</h3>
+      <div class="row2">
+        <label>Ort <input id="s-ort" type="text"></label>
+        <label style="flex:2">Kunde / Anlage <input id="s-kunde" type="text" placeholder="z. B. Alte Oper – Küchentechnik"></label>
+      </div>
+      <div class="row2">
+        <label>PNr <input id="s-pnr" type="text"></label>
+        <label>Vertrags-Nr. <input id="s-vnr" type="text"></label>
+        <label>Intervall
+          <select id="s-intervall"><option value="1">1 × jährlich</option><option value="2">2 × jährlich</option><option value="4">4 × jährlich</option><option value="0">ohne festes Intervall</option></select>
+        </label>
+      </div>
+      <div class="row2">
+        <label>Nächste Wartung (Monat) <input id="s-faellig" type="month"></label>
+        <label>€ / Jahr <input id="s-preis" type="text" inputmode="decimal"></label>
+        <label>Bearbeiter <input id="s-bearb" type="text" list="svcBearbList"></label>
+      </div>
+      <datalist id="svcBearbList"></datalist>
+      <div class="row2">
+        <label>Abnahme / Gewährleistungsbeginn <input id="s-abnahme" type="text"></label>
+        <label>Gewährleistungsende <input id="s-gewende" type="text"></label>
+      </div>
+      <label>Link zur Dokumentation <input id="s-doku" type="text" placeholder="https://…"></label>
+      <label>Notiz / Stand <input id="s-notiz" type="text" placeholder="z. B. angefragt, Preis+Termin offen"></label>
+      <fieldset class="crew">
+        <legend>Termine</legend>
+        <div class="phase-hint">Termin mit eigenen Technikern erscheint in der Woche. „erledigt" trägt ihn in die Historie ein und setzt die nächste Fälligkeit nach dem Intervall.</div>
+        <div id="s-termine"></div>
+        <button type="button" id="s-termin-add" class="btn">+ Termin</button>
+      </fieldset>
+      <fieldset class="crew">
+        <legend>Angefragte Servicefirmen</legend>
+        <div id="s-angebote"></div>
+        <button type="button" id="s-angebot-add" class="btn">+ Anfrage</button>
+      </fieldset>
+      <fieldset class="crew">
+        <legend>Bisherige Wartungen</legend>
+        <div id="s-history" class="svc-history"></div>
+      </fieldset>
+      <div class="dialog-actions">
+        <button id="s-delete" class="btn danger">Löschen</button>
+        <div class="spacer"></div>
+        <button id="s-cancel" class="btn">Abbrechen</button>
+        <button id="s-save" class="btn primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <div id="hoverlay" class="overlay" hidden>
     <div class="dialog wide" role="dialog" aria-modal="true">
       <h3>Änderungsverlauf</h3>
@@ -268,6 +335,7 @@
           <button class="btn active" data-hfilter="alle">Alle</button>
           <button class="btn" data-hfilter="zeitplan">Zeitplan</button>
           <button class="btn" data-hfilter="woche">Woche</button>
+          <button class="btn" data-hfilter="kundendienst">Kundendienst</button>
         </div>
         <span class="spacer"></span>
         <span id="hist-count" class="hist-count"></span>
@@ -281,8 +349,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
-  <script src="data.js?v=119"></script>
-  <script src="cloud.js?v=119"></script>
-  <script src="app.js?v=119"></script>
+  <script src="data.js?v=120"></script>
+  <script src="cloud.js?v=120"></script>
+  <script src="app.js?v=120"></script>
 </body>
 </html>

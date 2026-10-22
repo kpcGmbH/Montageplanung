@@ -44,7 +44,7 @@
   // ---- Persistenz (Gruppen/Zeilen + Monteure-Team) ----
   function snapshot() {
     const groups = PLAN.groups.map(g => ({ name: g.name, rows: g.rows.map(r => ({ id: r.id, label: r.label, site: r.site, nummer: r.nummer, ort: r.ort, name: r.name, strasse: r.strasse, plz: r.plz, ti: r.ti, archived: r.archived, capRole: r.capRole, bars: r.bars })) }));
-    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), nights: (PLAN.nights || {}), changelog: (PLAN.changelog || []) };
+    return { groups, team: PLAN.team, assignments, vehicles: (PLAN.vehicles || []), cars: (PLAN.cars || {}), nights: (PLAN.nights || {}), service: (PLAN.service || []), changelog: (PLAN.changelog || []) };
   }
   function applySnapshot(data) {
     if (data && Array.isArray(data.groups) && data.groups.length) PLAN.groups = data.groups;
@@ -56,6 +56,7 @@
     for (const v of (PLAN.vehicles || [])) if (v.name === 'KP-190') v.name = 'KP-170';   // Korrektur: das Fahrzeug heißt KP-170 (ID bleibt, damit Zuordnungen gelten)
     if (data && data.cars && typeof data.cars === 'object') PLAN.cars = data.cars; else PLAN.cars = PLAN.cars || {};
     if (data && data.nights && typeof data.nights === 'object') PLAN.nights = data.nights; else PLAN.nights = PLAN.nights || {};
+    if (data && Array.isArray(data.service)) PLAN.service = data.service; else PLAN.service = PLAN.service || [];
     // Changelog (Änderungsverlauf) – geteilt über den 3-Wege-Merge (Array-Vereinigung über id)
     if (data && Array.isArray(data.changelog)) PLAN.changelog = data.changelog;
     else PLAN.changelog = PLAN.changelog || [];
@@ -191,7 +192,7 @@
       id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
       ts: Date.now(),
       user: currentUser(),
-      view: view || (viewMode === 'week' ? 'woche' : 'zeitplan'),
+      view: view || (viewMode === 'week' ? 'woche' : viewMode === 'service' ? 'kundendienst' : 'zeitplan'),
       text: String(text),
     });
     if (PLAN.changelog.length > 500) PLAN.changelog.splice(0, PLAN.changelog.length - 500);
@@ -216,7 +217,7 @@
       if (day !== lastDay) { lastDay = day; list.appendChild(el('div', 'hist-day', wdLocal(e.ts) + ' · ' + day)); }
       const rowEl = el('div', 'hist-row');
       rowEl.appendChild(el('span', 'hist-time', hhmmTs(e.ts)));
-      rowEl.appendChild(el('span', 'hist-badge hb-' + (e.view || 'zeitplan'), e.view === 'woche' ? 'Woche' : 'Zeitplan'));
+      rowEl.appendChild(el('span', 'hist-badge hb-' + (e.view || 'zeitplan'), e.view === 'woche' ? 'Woche' : e.view === 'kundendienst' ? 'Kundendienst' : 'Zeitplan'));
       const usr = el('span', 'hist-user', shortUser(e.user)); usr.title = e.user || '';
       rowEl.appendChild(usr);
       rowEl.appendChild(el('span', 'hist-text', e.text));
@@ -632,6 +633,7 @@
     for (const k of Object.keys(assignments)) if (k.startsWith(pre)) delete assignments[k];
     for (const k of Object.keys(PLAN.cars || {})) if (k.startsWith(pre)) delete PLAN.cars[k];
     for (const k of Object.keys(PLAN.nights || {})) if (k.startsWith(pre)) delete PLAN.nights[k];
+    for (const sv of (PLAN.service || [])) for (const t of (sv.termine || [])) if ((t.wer || []).includes(id)) t.wer = t.wer.filter(x => x !== id);
     return n;
   }
   const projRows = () => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return g ? g.rows.filter(r => !r.archived) : []; };
@@ -1808,7 +1810,7 @@
 
   // ---- Render & Steuerung ----
   const viewport = document.getElementById('viewport');
-  function render() { viewMode === 'week' ? renderWeek() : renderTimeline(); if (typeof updateArchiveToggle === 'function') updateArchiveToggle(); }
+  function render() { viewMode === 'week' ? renderWeek() : viewMode === 'service' ? renderService() : renderTimeline(); if (typeof updateArchiveToggle === 'function') updateArchiveToggle(); }
   let weekShown = false;
   function renderTimeline() {
     weekShown = false;
@@ -1871,14 +1873,14 @@
     const note = (a && a.type !== 'baustelle') ? a : null;
     if (note && ABSENCE_TYPES.has(note.type)) return false;
     if (d && d.urlaub && !(d.projects || []).length) return false;
-    return !!((d && d.projects.length) || (note && note.type !== 'buero'));
+    return !!((d && d.projects.length) || (note && note.type !== 'buero') || svcDay(pid, parse(iso)).length);
   }
   // Hat die Person an dem Tag überhaupt etwas (Baustelle oder Termin, keine Abwesenheit)?
   function carPresent(pid, iso, derived) {
     const k = akey(pid, iso), d = derived[k], a = assignments[k];
     const note = (a && a.type !== 'baustelle') ? a : null;
     if (note && ABSENCE_TYPES.has(note.type)) return false;
-    return !!((d && d.projects.length && !(d.urlaub && !note)) || note);
+    return !!((d && d.projects.length && !(d.urlaub && !note)) || note || svcDay(pid, parse(iso)).length);
   }
   function effVeh(pid, iso, derived) {
     const x = (PLAN.cars || {})[akey(pid, iso)];
@@ -2338,7 +2340,11 @@
       dates.forEach((ms, i) => {
         const dISO = isoStr(ms), key = akey(p.id, dISO);
         const der = derived[key] || { projects: [], urlaub: false, booking: false };
-        const note = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
+        const svc = svcDay(p.id, ms);
+        const manualNote = (assignments[key] && assignments[key].type !== 'baustelle') ? assignments[key] : null;
+        // Kundendienst-Termine verhalten sich wie ein Termin der Person (neben einer Baustelle möglich)
+        const svcTxt = svc.map(x => 'Wartung ' + (x.s.kunde || '') + (x.s.ort ? ' ' + x.s.ort : '')).join(' / ');
+        const note = svc.length ? { text: (manualNote ? manualNote.text + ' · ' : '') + svcTxt, type: manualNote && ABSENCE_TYPES.has(manualNote.type) ? manualNote.type : 'kundendienst', svc: true } : manualNote;
         const proj = der.projects;
         const disp = (der.labels && der.labels.length) ? der.labels : proj;   // Anzeige (Kleinprojekte: Bezeichnung der Montage)
         let text = '', type = '', conflict = false, title = '', unconfirmed = false, override = false, split = false, extra = '', extraType = '';
@@ -2419,7 +2425,7 @@
           const pj = proj.slice(), fd = dISO, fid = p.id;
           cell.addEventListener('dragstart', (e) => { cell.classList.add('dragging'); e.dataTransfer.setData('text/plain', JSON.stringify({ move: { fromId: fid, fromDate: fd, projects: pj } })); });
           cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
-        } else if (note) {
+        } else if (manualNote && !svc.length) {
           // Manuelle Notiz (Büro/n.v./Urlaub/…) auf eine andere Zelle verschieben
           cell.draggable = true;
           const nk = key, ntext = note.text, ntype = note.type;
@@ -2681,7 +2687,7 @@
     const mondayIdx = dayIndex(monday, startMs);
     viewport.scrollLeft = Math.max(0, mondayIdx * dayWidth - dayWidth);
   }
-  function scrollToToday() { scrollToWeek(mondayMs(todayMs())); }
+  function scrollToToday() { if (viewMode === 'timeline') scrollToWeek(mondayMs(todayMs())); }   // nur im Zeitplan (Woche/Kundendienst haben eigene Spalten)
 
   // ---- Zellen-Editor (Wochenplan) ----
   const woverlay = document.getElementById('woverlay');
@@ -2876,6 +2882,16 @@
     // damit ein geplanter Einsatz auch dann bearbeitbar ist, wenn zusätzlich eine Notiz auf dem Tag liegt.
     wProjectDraft = dayEntries(person, ms, curCellIsBl);
     renderProjRows();
+    let wsv = document.getElementById('w-svc');
+    if (!wsv) { wsv = el('div', 'w-svc'); wsv.id = 'w-svc'; document.getElementById('w-note-fields').before(wsv); }
+    wsv.innerHTML = '';
+    const svcHere = svcDay(person.id, ms);
+    for (const x of svcHere) {
+      const b = el('button', 'btn w-svc-btn', '🔧 Wartung ' + svcName(x.s) + ' – im Kundendienst bearbeiten');
+      b.onclick = () => { closeCellEditor(); openServiceDialog(x.s); };
+      wsv.appendChild(b);
+    }
+    wsv.hidden = !svcHere.length;
     wType.value = note ? note.type : (curCellIsBl ? 'bauleitung' : CELL_TYPE_DEFAULT);   // Bauleiter: Standardtyp Bauleitung (nicht Montage)
     // Leere, freie Zelle: Text mit dem Standardtext des Typs vorbelegen (sonst würde „Speichern" nichts speichern)
     // Fahrzeug-Auswahl: Standard (Stammfahrzeug an Einsatztagen), keines, oder ein bestimmtes – mit Belegung des Tages
@@ -3044,20 +3060,303 @@
     };
   });
 
+  // ================= KUNDENDIENST (Wartungsverträge) =================
+  // PLAN.service = [{ id, ort, kunde, pnr, vnr, intervall (Wartungen/Jahr, 0 = frei), faellig 'YYYY-MM', faelligText,
+  //   preis, bearbeiter, abnahme, gewende, doku, notiz, history:[{date,text}], angebote:[{firma,datum,preis}],
+  //   termine:[{id,start,end,wer:[personIds],firma,notiz,erledigt}] }]
+  // Termine mit eigenen Technikern laufen in der Woche bei der Person zusammen (Typ Kundendienst).
+  const svcList = () => (PLAN.service = PLAN.service || []);
+  const ymOf = (ms) => isoStr(ms).slice(0, 7);
+  const ymAdd = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return isoStr(d.getTime()).slice(0, 7); };
+  const SVC_MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+  const ymLabel = (ym) => SVC_MONTHS[+ym.slice(5, 7) - 1] + ' ' + ym.slice(2, 4);
+  const svcName = (s) => (s.kunde || '') + (s.ort ? ' (' + s.ort + ')' : '');
+  // Termin in der Woche: Personen (eigene Techniker) je Tag
+  function svcDay(pid, ms) {
+    const out = [];
+    for (const s of svcList()) for (const t of (s.termine || [])) {
+      if (!t.start || !(t.wer || []).includes(pid)) continue;
+      if (parse(t.start) <= ms && parse(t.end || t.start) >= ms) out.push({ s, t });
+    }
+    return out;
+  }
+  // Ampel der Fälligkeit: überfällig / bald fällig (≤ 1 Monat) / später; geplant = offener Termin vorhanden
+  function svcState(s) {
+    const now = ymOf(todayMs());
+    const planned = (s.termine || []).some(t => !t.erledigt && t.start);
+    if (planned) return 'planned';
+    if (!s.faellig) return 'none';
+    if (s.faellig < now) return 'over';
+    if (s.faellig <= ymAdd(now, 1)) return 'soon';
+    return 'ok';
+  }
+
+  // ---- Ansicht ----
+  let svcMonthStart = null;
+  function renderService() {
+    const now = ymOf(todayMs());
+    if (!svcMonthStart) svcMonthStart = ymAdd(now, -2);
+    const months = []; for (let i = 0; i < 16; i++) months.push(ymAdd(svcMonthStart, i));
+    // Filter
+    const q = (document.getElementById('svcSearch').value || '').trim().toLowerCase();
+    const bearb = document.getElementById('svcBearb').value, flt = document.getElementById('svcFilter').value;
+    const bsel = document.getElementById('svcBearb'), names = [...new Set(svcList().map(s => (s.bearbeiter || '').trim()).filter(Boolean))].sort();
+    if (bsel.options.length - 1 !== names.length) { const cur = bsel.value; bsel.innerHTML = '<option value="">alle Bearbeiter</option>'; for (const n of names) { const o = el('option', null, n); o.value = n; bsel.appendChild(o); } bsel.value = cur; }
+    const list = svcList().filter(s => {
+      if (q && !((s.kunde || '') + ' ' + (s.ort || '') + ' ' + (s.pnr || '')).toLowerCase().includes(q)) return false;
+      if (bearb && (s.bearbeiter || '').trim() !== bearb) return false;
+      const st = svcState(s);
+      if (flt === 'due' && !(st === 'over' || st === 'soon')) return false;
+      if (flt === 'planned' && st !== 'planned') return false;
+      if (flt === 'open' && st === 'planned') return false;
+      return true;
+    }).sort((a, b) => (a.ort || '').localeCompare(b.ort || '', 'de') || (a.kunde || '').localeCompare(b.kunde || '', 'de'));
+    const grid = el('div', 'svcgrid');
+    grid.style.gridTemplateColumns = '320px 74px repeat(' + months.length + ', minmax(62px, 1fr))';
+    const corner = el('div', 'wk-corner'); corner.textContent = list.length + ' Verträge'; grid.appendChild(corner);
+    grid.appendChild(el('div', 'wk-dayhead', 'Intervall'));
+    months.forEach(ym => {
+      const h = el('div', 'wk-dayhead' + (ym === now ? ' today' : ''), ymLabel(ym));
+      if (ym === months[0]) { const p = el('button', 'svc-nav', '‹'); p.title = 'früher'; p.onclick = () => { svcMonthStart = ymAdd(svcMonthStart, -3); renderService(); }; h.prepend(p); }
+      if (ym === months[months.length - 1]) { const n = el('button', 'svc-nav', '›'); n.title = 'später'; n.onclick = () => { svcMonthStart = ymAdd(svcMonthStart, 3); renderService(); }; h.appendChild(n); }
+      grid.appendChild(h);
+    });
+    if (!svcList().length) {
+      const e = el('div', 'svc-empty', 'Noch keine Wartungsverträge. Über „Excel importieren" die bestehende Wartungsliste übernehmen oder mit „+ Vertrag" anlegen.');
+      e.style.gridColumn = '1 / -1'; grid.appendChild(e);
+    }
+    for (const s of list) {
+      const st = svcState(s);
+      const nm = el('div', 'wk-name svc-name');
+      nm.appendChild(el('span', 'sv-dot sv-' + st));
+      const tx = el('span', 'wk-person-name'); tx.textContent = svcName(s); nm.appendChild(tx);
+      if (s.bearbeiter) nm.appendChild(el('span', 'svc-bearb', s.bearbeiter));
+      nm.title = svcName(s) + (s.pnr ? '\nPNr ' + s.pnr : '') + (s.faellig ? '\nnächste Wartung: ' + ymLabel(s.faellig) : (s.faelligText ? '\n' + s.faelligText : '')) + (s.notiz ? '\n' + s.notiz : '') + '\nKlick: bearbeiten';
+      nm.onclick = () => openServiceDialog(s);
+      grid.appendChild(nm);
+      grid.appendChild(el('div', 'wk-cell svc-iv', s.intervall ? s.intervall + '× / Jahr' : '–'));
+      months.forEach(ym => {
+        const c = el('div', 'wk-cell svc-cell' + (ym === now ? ' today' : ''));
+        const done = (s.history || []).filter(h => h.date && h.date.slice(0, 7) === ym);
+        const terms = (s.termine || []).filter(t => t.start && t.start.slice(0, 7) === ym);
+        for (const h of done) { const d = el('span', 'sv-done', '✓ ' + h.date.slice(8, 10) + '.'); d.title = 'durchgeführt ' + fmt(parse(h.date)) + (h.text ? ' – ' + h.text : ''); c.appendChild(d); }
+        for (const t of terms) {
+          const who = (t.wer || []).map(monteurName).join(', ') || t.firma || 'noch niemand';
+          const ch = el('span', 'sv-chip' + (t.erledigt ? ' done' : '') + ((t.wer || []).length ? '' : ' ext'), t.start.slice(8, 10) + '.');
+          ch.title = 'Termin ' + fmt(parse(t.start)) + (t.end && t.end !== t.start ? '–' + fmt(parse(t.end)) : '') + ' · ' + who + (t.notiz ? '\n' + t.notiz : '');
+          c.appendChild(ch);
+        }
+        if (ym === months[0] && s.faellig && s.faellig < ym && st === 'over') { const d = el('span', 'sv-due sv-over', ''); d.title = 'überfällig seit ' + ymLabel(s.faellig); c.appendChild(d); c.appendChild(el('span', 'sv-since', '« ' + ymLabel(s.faellig))); }
+        if (s.faellig === ym && !terms.some(t => !t.erledigt)) { const d = el('span', 'sv-due sv-' + (st === 'planned' ? 'ok' : st)); d.title = 'fällig ' + ymLabel(ym); c.appendChild(d); }
+        c.onclick = () => openServiceDialog(s, ym);
+        grid.appendChild(c);
+      });
+    }
+    const sl = svcShown ? viewport.scrollLeft : 0, st = svcShown ? viewport.scrollTop : 0;
+    viewport.innerHTML = '';
+    viewport.appendChild(grid);
+    viewport.scrollLeft = sl; viewport.scrollTop = st;
+    svcShown = true;
+  }
+  let svcShown = false;
+  ['svcSearch', 'svcBearb', 'svcFilter'].forEach(id => { const e = document.getElementById(id); e.addEventListener(id === 'svcSearch' ? 'input' : 'change', () => renderService()); });
+
+  // ---- Dialog ----
+  const soverlay = document.getElementById('soverlay');
+  let curSvc = null, svcDraft = null;
+  const S = (id) => document.getElementById(id);
+  function openServiceDialog(s, ym) {
+    curSvc = s || null;
+    svcDraft = JSON.parse(JSON.stringify(s || { ort: '', kunde: '', intervall: 1, history: [], angebote: [], termine: [] }));
+    svcDraft.termine = svcDraft.termine || []; svcDraft.angebote = svcDraft.angebote || []; svcDraft.history = svcDraft.history || [];
+    S('sTitle').textContent = s ? 'Wartungsvertrag · ' + svcName(s) : 'Neuer Wartungsvertrag';
+    S('s-ort').value = svcDraft.ort || ''; S('s-kunde').value = svcDraft.kunde || ''; S('s-pnr').value = svcDraft.pnr || ''; S('s-vnr').value = svcDraft.vnr || '';
+    S('s-intervall').value = String(svcDraft.intervall || 0); S('s-faellig').value = svcDraft.faellig || ''; S('s-preis').value = svcDraft.preis != null && svcDraft.preis !== '' ? String(svcDraft.preis).replace('.', ',') : '';
+    S('s-bearb').value = svcDraft.bearbeiter || ''; S('s-abnahme').value = svcDraft.abnahme || ''; S('s-gewende').value = svcDraft.gewende || ''; S('s-doku').value = svcDraft.doku || '';
+    S('s-notiz').value = [svcDraft.notiz, svcDraft.faelligText].filter(Boolean).join(' · ');
+    const dl = S('svcBearbList'); dl.innerHTML = ''; for (const n of new Set(svcList().map(x => x.bearbeiter).filter(Boolean))) { const o = document.createElement('option'); o.value = n; dl.appendChild(o); }
+    S('s-delete').style.display = s ? '' : 'none';
+    if (ym && s && !svcDraft.termine.some(t => t.start && t.start.slice(0, 7) === ym)) svcPendingYm = ym; else svcPendingYm = null;
+    renderSvcTermine(); renderSvcAngebote(); renderSvcHistory();
+    soverlay.hidden = false;
+  }
+  let svcPendingYm = null;
+  function renderSvcTermine() {
+    const box = S('s-termine'); box.innerHTML = '';
+    if (!svcDraft.termine.length) box.appendChild(el('div', 'phase-hint', 'Noch kein Termin.' + (svcPendingYm ? ' „+ Termin" legt ihn in ' + ymLabel(svcPendingYm) + ' an.' : '')));
+    svcDraft.termine.forEach((t, i) => {
+      const card = el('div', 'svc-termin' + (t.erledigt ? ' done' : ''));
+      const r1 = el('div', 'phase-row2');
+      const von = document.createElement('input'); von.type = 'date'; von.value = t.start || ''; von.onchange = () => { const single = !t.end || t.end === t.start; t.start = von.value; if (single || t.end < t.start) { t.end = t.start; bis.value = t.end; } };
+      const bis = document.createElement('input'); bis.type = 'date'; bis.value = t.end || t.start || ''; bis.onchange = () => { t.end = bis.value < t.start ? t.start : bis.value; bis.value = t.end; };
+      const firma = document.createElement('input'); firma.type = 'text'; firma.placeholder = 'oder Servicefirma'; firma.value = t.firma || ''; firma.oninput = () => { t.firma = firma.value; };
+      const ok = document.createElement('input'); ok.type = 'checkbox'; ok.checked = !!t.erledigt; ok.onchange = () => { t.erledigt = ok.checked; card.classList.toggle('done', ok.checked); };
+      const del = el('span', 'phase-del', '✕'); del.title = 'Termin entfernen'; del.onclick = () => { svcDraft.termine.splice(i, 1); renderSvcTermine(); };
+      const L = (t1, inp, cls) => { const l = el('label', 'phase-fld' + (cls ? ' ' + cls : ''), t1); l.appendChild(inp); return l; };
+      r1.appendChild(L('Von', von)); r1.appendChild(L('Bis', bis)); r1.appendChild(L('Servicefirma', firma)); r1.appendChild(L('erledigt', ok, 'phase-wk')); r1.appendChild(del);
+      card.appendChild(r1);
+      // eigene Techniker (Chips)
+      const chips = el('div', 'f-bl-chips');
+      for (const m of PLAN.team) {
+        const on = (t.wer || []).includes(m.id), chip = el('span', 'trade-chip' + (on ? ' on' : ''), m.name);
+        if (on) chip.style.background = '#2f9e8f';
+        chip.onclick = () => { t.wer = t.wer || []; if (on) t.wer = t.wer.filter(x => x !== m.id); else t.wer.push(m.id); renderSvcTermine(); };
+        chips.appendChild(chip);
+      }
+      card.appendChild(el('div', 'assign-title', 'Eigene Techniker'));
+      card.appendChild(chips);
+      const notiz = document.createElement('input'); notiz.type = 'text'; notiz.placeholder = 'Notiz zum Termin (z. B. DGUV V3, nur Spülmaschine)'; notiz.value = t.notiz || ''; notiz.oninput = () => { t.notiz = notiz.value; };
+      notiz.className = 'svc-tnotiz'; card.appendChild(notiz);
+      box.appendChild(card);
+    });
+  }
+  S('s-termin-add').onclick = () => {
+    const ym = svcPendingYm || S('s-faellig').value || ymOf(todayMs());
+    let d = parse(ym + '-01'); while (!isWorkdayMs(d)) d = addDays(d, 1);
+    svcDraft.termine.push({ id: 'st' + Date.now().toString(36), start: isoStr(d), end: isoStr(d), wer: [], firma: '', notiz: '', erledigt: false });
+    svcPendingYm = null; renderSvcTermine();
+  };
+  function renderSvcAngebote() {
+    const box = S('s-angebote'); box.innerHTML = '';
+    svcDraft.angebote.forEach((a, i) => {
+      const r = el('div', 'phase-row2');
+      const mk = (k, ph, w) => { const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = ph; inp.value = a[k] || ''; inp.oninput = () => { a[k] = inp.value; }; inp.style.flex = w; return inp; };
+      r.appendChild(mk('firma', 'Firma', '2')); r.appendChild(mk('datum', 'Datum', '1')); r.appendChild(mk('preis', 'Preis / Stand', '1'));
+      const del = el('span', 'phase-del', '✕'); del.onclick = () => { svcDraft.angebote.splice(i, 1); renderSvcAngebote(); }; r.appendChild(del);
+      box.appendChild(r);
+    });
+  }
+  S('s-angebot-add').onclick = () => { svcDraft.angebote.push({ firma: '', datum: '', preis: '' }); renderSvcAngebote(); };
+  function renderSvcHistory() {
+    const box = S('s-history'); box.innerHTML = '';
+    const h = svcDraft.history.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    if (!h.length) { box.appendChild(el('div', 'phase-hint', 'Noch keine durchgeführten Wartungen eingetragen.')); return; }
+    for (const e of h) box.appendChild(el('div', 'svc-hrow', (e.date ? fmt(parse(e.date)) : '—') + (e.text && e.text !== (e.date ? fmt(parse(e.date)) : '') ? '  ·  ' + e.text : '')));
+  }
+  function closeServiceDialog() { soverlay.hidden = true; curSvc = null; svcDraft = null; }
+  S('s-cancel').onclick = closeServiceDialog;
+  soverlay.addEventListener('click', (e) => { if (e.target === soverlay) closeServiceDialog(); });
+  S('s-save').onclick = () => {
+    const d = svcDraft; if (!d) return;
+    d.ort = S('s-ort').value.trim(); d.kunde = S('s-kunde').value.trim();
+    if (!d.kunde) { S('s-kunde').focus(); return; }
+    d.pnr = S('s-pnr').value.trim(); d.vnr = S('s-vnr').value.trim(); d.intervall = +S('s-intervall').value || 0;
+    d.faellig = S('s-faellig').value || ''; if (d.faellig) delete d.faelligText;
+    const pr = S('s-preis').value.trim().replace(/\./g, '').replace(',', '.'); d.preis = pr === '' ? '' : (isNaN(+pr) ? S('s-preis').value.trim() : +pr);
+    d.bearbeiter = S('s-bearb').value.trim(); d.abnahme = S('s-abnahme').value.trim(); d.gewende = S('s-gewende').value.trim(); d.doku = S('s-doku').value.trim();
+    d.notiz = S('s-notiz').value.trim(); delete d.faelligText;
+    // neu erledigte Termine → Historie + nächste Fälligkeit nach Intervall
+    const before = curSvc ? (curSvc.termine || []) : [];
+    const parts = [];
+    for (const t of d.termine) {
+      if (!t.start) continue;
+      const was = before.find(b => b.id === t.id);
+      if (t.erledigt && !(was && was.erledigt)) {
+        if (!d.history.some(h => h.date === t.start)) d.history.push({ date: t.start, text: (t.wer || []).map(monteurName).join(', ') || t.firma || '' });
+        if (d.intervall) { const nx = ymAdd(t.start.slice(0, 7), Math.round(12 / d.intervall)); if (!d.faellig || d.faellig <= nx) d.faellig = nx; }
+        parts.push('erledigt ' + fmt(parse(t.start)));
+      } else if (!was) parts.push('Termin ' + fmt(parse(t.start)) + ((t.wer || []).length ? ' (' + t.wer.map(monteurName).join(', ') + ')' : t.firma ? ' (' + t.firma + ')' : ''));
+    }
+    historyBatch(() => {
+      if (curSvc) { Object.keys(curSvc).forEach(k => delete curSvc[k]); Object.assign(curSvc, d); }
+      else { d.id = 'sv' + Date.now().toString(36); svcList().push(d); }
+      logChange(`Kundendienst „${svcName(d)}" ${curSvc ? 'bearbeitet' : 'angelegt'}${parts.length ? ' · ' + parts.join(' · ') : ''}${d.faellig ? ' · nächste Wartung ' + ymLabel(d.faellig) : ''}`, 'kundendienst');
+    });
+    closeServiceDialog(); render();
+  };
+  S('s-delete').onclick = () => {
+    if (!curSvc || !confirm(`Wartungsvertrag „${svcName(curSvc)}" löschen?`)) return;
+    const s = curSvc;
+    historyBatch(() => { PLAN.service = svcList().filter(x => x !== s); logChange(`Kundendienst „${svcName(s)}" gelöscht`, 'kundendienst'); });
+    closeServiceDialog(); render();
+  };
+  S('svcAdd').onclick = () => openServiceDialog(null);
+
+  // ---- Einmaliger Import der Excel-Wartungsliste (im Browser gelesen, nichts wird hochgeladen außer in den Plan) ----
+  function loadSheetJs() {
+    if (window.XLSX) return Promise.resolve();
+    return new Promise((ok, fail) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload = ok; sc.onerror = () => fail(new Error('Excel-Leser konnte nicht geladen werden (Internet?)')); document.head.appendChild(sc); });
+  }
+  const p2s = (n) => String(n).padStart(2, '0');
+  function parseDates(txt) {   // alle Datumsangaben aus einem Freitext (dd.mm.yyyy, dd.+dd.mm.yy, yyyy-mm-dd)
+    const out = [];
+    const s = String(txt || '');
+    for (const m of s.matchAll(/(\d{4})-(\d{2})-(\d{2})/g)) out.push(m[1] + '-' + m[2] + '-' + m[3]);
+    for (const m of s.matchAll(/(\d{1,2})\.\s*(?:\+\s*\d{1,2}\.\s*)?(\d{1,2})\.\s*(\d{2,4})/g)) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; out.push(y + '-' + p2s(m[2]) + '-' + p2s(m[1])); }
+    return out.filter(d => !isNaN(parse(d)));
+  }
+  function importServiceWorkbook(wb) {
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const ref = XLSX.utils.decode_range(ws['!ref']);
+    const cellTxt = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; if (!x) return ''; if (x.t === 'd' && x.v instanceof Date) return isoStr(Date.UTC(x.v.getFullYear(), x.v.getMonth(), x.v.getDate())); return String(x.w != null ? x.w : x.v).trim(); };
+    const hdr = []; for (let c = ref.s.c; c <= ref.e.c; c++) hdr[c] = cellTxt(0, c).replace(/\s+/g, ' ').toLowerCase();
+    const col = (re) => hdr.findIndex(h => h && re.test(h));
+    const C = { ort: col(/^ort/), kunde: col(/^kunde/), vnr: col(/wartungsvertrag/), pnr: col(/^pnr/), abn: col(/abnahme/), gew: col(/gewährleistungsende/), iv: col(/intervall/), next: col(/nächste wartung/), preis: col(/€/), bearb: col(/bearbeiter/), doku: col(/dokumentation/) };
+    const termCols = hdr.map((h, c) => (h && /termin\s*\d+\.\s*wartung/.test(h) ? c : -1)).filter(c => c >= 0);
+    const firmCols = hdr.map((h, c) => (h && /servicefirma/.test(h) ? c : -1)).filter(c => c >= 0);
+    const lastTerm = Math.max(...termCols), firstFirm = firmCols.length ? Math.min(...firmCols) : ref.e.c + 1;
+    const out = []; let lastOrt = '';
+    for (let r = 1; r <= ref.e.r; r++) {
+      const kunde = cellTxt(r, C.kunde); if (!kunde) continue;
+      const ort = cellTxt(r, C.ort) || lastOrt; lastOrt = ort;
+      const ivTxt = cellTxt(r, C.iv), iv = /2/.test(ivTxt) ? 2 : /1/.test(ivTxt) ? 1 : 0;
+      const nx = cellTxt(r, C.next); let faellig = '', faelligText = '';
+      const m = nx.match(/^(\d{4})\s*\/?\s*(\d{1,2})/); if (m && +m[2] >= 1 && +m[2] <= 12) faellig = m[1] + '-' + p2s(m[2]); else if (/^\d{4}-\d{2}/.test(nx)) faellig = nx.slice(0, 7); else faelligText = nx;
+      const history = [];
+      for (const c of termCols) {
+        const t = cellTxt(r, c); if (!t) continue;
+        const ds = parseDates(t);
+        if (!ds.length) { history.push({ date: '', text: t.replace(/\s+/g, ' ') }); continue; }
+        const pure = /^\s*[\d.\-+\s]*$/.test(t);
+        ds.forEach((d, i) => history.push({ date: d, text: i === 0 && !pure ? t.replace(/\s+/g, ' ') : '' }));
+      }
+      const notes = []; for (let c = lastTerm + 1; c < firstFirm; c++) { if (c === C.bearb) continue; const t = cellTxt(r, c); if (t) notes.push(t.replace(/\s+/g, ' ')); }
+      const angebote = []; for (const c of firmCols) { const f = cellTxt(r, c); if (!f) continue; const dt = cellTxt(r, c + 1), pr = cellTxt(r, c + 2); angebote.push({ firma: f.replace(/\s+/g, ' '), datum: (parseDates(dt)[0] ? fmt(parse(parseDates(dt)[0])) : '') + (dt && !/^\d{4}-\d{2}-\d{2}$/.test(dt) && !/^[\d.]+$/.test(dt) ? ' ' + dt.replace(/\s+/g, ' ') : ''), preis: pr.replace(/\s+/g, ' ') }); }
+      const px = ws[XLSX.utils.encode_cell({ r, c: C.preis })], preisTxt = px && px.t === 'n' ? px.v : cellTxt(r, C.preis), preisNum = typeof preisTxt === 'number' ? preisTxt : +String(preisTxt).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
+      out.push({ id: 'sv' + r + '~' + (kunde + ort).replace(/[^A-Za-z0-9]/g, '').slice(0, 16), ort, kunde, vnr: cellTxt(r, C.vnr), pnr: cellTxt(r, C.pnr), abnahme: cellTxt(r, C.abn), gewende: cellTxt(r, C.gew),
+        intervall: iv, faellig, faelligText, preis: preisTxt === '' ? '' : (isNaN(preisNum) ? preisTxt : preisNum), bearbeiter: cellTxt(r, C.bearb), doku: cellTxt(r, C.doku),
+        notiz: [ivTxt && !iv ? ivTxt : '', ...notes].filter(Boolean).join(' · '), history, angebote, termine: [] });
+    }
+    return out;
+  }
+  S('svcImport').onclick = () => {
+    if (svcList().length && !confirm('Es gibt bereits ' + svcList().length + ' Wartungsverträge.\nBeim Import werden neue Verträge ergänzt; vorhandene mit gleichem Kunden + Ort bleiben unverändert. Fortfahren?')) return;
+    S('svcFile').value = ''; S('svcFile').click();
+  };
+  S('svcFile').onchange = async () => {
+    const f = S('svcFile').files[0]; if (!f) return;
+    try {
+      await loadSheetJs();
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
+      const rows = importServiceWorkbook(wb);
+      const key = (s) => (s.kunde + '|' + s.ort).toLowerCase().replace(/\s+/g, ' ').trim();
+      const have = new Set(svcList().map(key)), add = rows.filter(s => !have.has(key(s)));
+      if (!confirm(rows.length + ' Verträge in der Liste gefunden, davon ' + add.length + ' neu.\nJetzt übernehmen?')) return;
+      historyBatch(() => { svcList().push(...add); logChange(`Kundendienst: ${add.length} Wartungsverträge aus Excel übernommen (${f.name})`, 'kundendienst'); });
+      toast(add.length + ' Wartungsverträge übernommen');
+      render();
+    } catch (e) { alert('Import fehlgeschlagen: ' + (e && e.message || e)); }
+  };
+
   // ---- Ansicht umschalten & Wochen-Navigation ----
   function setView(mode) {
     const fromWeek = viewMode === 'week' && mode === 'timeline';
     viewMode = mode;
     document.getElementById('viewTimeline').classList.toggle('active', mode === 'timeline');
     document.getElementById('viewWeek').classList.toggle('active', mode === 'week');
-    document.getElementById('hint').style.display = mode === 'week' ? 'none' : '';
+    document.getElementById('viewService').classList.toggle('active', mode === 'service');
+    document.getElementById('hint').style.display = mode === 'timeline' ? '' : 'none';
     document.getElementById('weekbar').hidden = mode !== 'week';
-    document.querySelectorAll('.timeline-only').forEach(elm => { elm.style.display = mode === 'week' ? 'none' : ''; });
+    document.getElementById('svcbar').hidden = mode !== 'service';
+    document.querySelectorAll('.timeline-only').forEach(elm => { elm.style.display = mode === 'timeline' ? '' : 'none'; });
+    if (mode !== 'week') weekShown = false;
+    if (mode !== 'service') svcShown = false;
     render();
     // Zurück aus der Woche: Zeitplan auf die dort gezeigte Woche stellen (statt an den Planbeginn zu springen)
     if (fromWeek) { scrollTodayPending = false; requestAnimationFrame(() => scrollToWeek(selMonday)); }
   }
   document.getElementById('viewTimeline').onclick = () => setView('timeline');
+  document.getElementById('viewService').onclick = () => setView('service');
   document.getElementById('viewWeek').onclick = () => setView('week');
   document.getElementById('wkPrev').onclick = () => { selMonday = addDays(selMonday, -7); renderWeek(); };
   document.getElementById('wkNext').onclick = () => { selMonday = addDays(selMonday, 7); renderWeek(); };
@@ -3413,7 +3712,7 @@
       if (mode === 'merge') { histSync(); updateUndoUI(); } else { histReset(); revealApp(); }   // Abgleich im Hintergrund: Ansicht nicht verspringen
     });
     // Solange ein Dialog/die Termineinladung offen ist, nicht abgleichen – die Maske hält Verweise auf die Daten
-    Cloud.onCanSync(() => !['overlay', 'poverlay', 'roverlay', 'moverlay', 'bloverlay', 'woverlay'].some(id => { const o = document.getElementById(id); return o && !o.hidden; }) && (!tiView || tiView.hidden));
+    Cloud.onCanSync(() => !['overlay', 'poverlay', 'roverlay', 'moverlay', 'bloverlay', 'woverlay', 'soverlay'].some(id => { const o = document.getElementById(id); return o && !o.hidden; }) && (!tiView || tiView.hidden));
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
     Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); });
   } else {
