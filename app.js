@@ -2434,10 +2434,34 @@
           }
           else if (data.move && p.kind === 'bauleiter') { toast('Monteur-Einsätze lassen sich nicht auf die Bauleitung ziehen.'); }
           else if (data.move) {
-            // gleiche Person, anderer Tag = ganzen Einsatz verschieben; andere Person = Übergabe dieses Tages
-            if (data.move.fromId === p.id) weekShiftEinsatz(p.id, data.move.fromDate, dISO, data.move.projects);
-            else weekReassign(data.move.fromId, data.move.fromDate, p.id, dISO, data.move.projects);
-            renderWeek();
+            // andere Person = Übergabe dieses Tages; gleiche Person, anderer Tag = verschieben – sind im Einsatz noch
+            // andere eingeplant, nachfragen: nur diese Person oder den ganzen Einsatz (sonst wandern alle mit)
+            if (data.move.fromId !== p.id) { weekReassign(data.move.fromId, data.move.fromDate, p.id, dISO, data.move.projects); renderWeek(); }
+            else if (data.move.fromDate !== dISO) {
+              const D = parse(data.move.fromDate);
+              let hit = null;
+              for (const row of projRows()) if ((data.move.projects || []).indexOf(row.id) >= 0) for (const b of row.bars)
+                if (!hit && (b.phases || []).some(ph => assignedRanges(ph).some(r => r.id === p.id && parse(r.start) <= D && parse(r.end) >= D))) hit = b;
+              const others = hit ? [...new Set((hit.phases || []).flatMap(ph => assignedRanges(ph).map(r => r.id)))].filter(id => id !== p.id) : [];
+              const dayTxt = WDAYS[(new Date(ms).getUTCDay() + 6) % 7] + ' ' + fmt(ms).slice(0, 6);
+              if (!others.length) { weekShiftEinsatz(p.id, data.move.fromDate, dISO, data.move.projects); renderWeek(); }
+              else {
+                closeNeedMenu();
+                needMenu = el('div', 'need-menu');
+                needMenu.appendChild(el('div', 'need-menu-head', 'Verschieben auf ' + dayTxt));
+                const b1 = el('button', 'need-menu-item'); b1.appendChild(el('span', null, 'Nur ' + p.name + ' verschieben'));
+                b1.onclick = () => { closeNeedMenu(); weekReassign(p.id, data.move.fromDate, p.id, dISO, data.move.projects); renderWeek(); };
+                const b2 = el('button', 'need-menu-item'); b2.appendChild(el('span', null, 'Ganzen Einsatz verschieben'));
+                b2.appendChild(el('span', 'need-menu-busy', 'mit ' + others.map(monteurName).join(', ')));
+                b2.onclick = () => { closeNeedMenu(); weekShiftEinsatz(p.id, data.move.fromDate, dISO, data.move.projects); renderWeek(); };
+                const b3 = el('button', 'need-menu-item'); b3.appendChild(el('span', null, 'Abbrechen')); b3.onclick = () => closeNeedMenu();
+                needMenu.appendChild(b1); needMenu.appendChild(b2); needMenu.appendChild(b3);
+                document.body.appendChild(needMenu);
+                needMenu.style.left = Math.max(8, Math.min(e.clientX, window.innerWidth - needMenu.offsetWidth - 8)) + 'px';
+                needMenu.style.top = Math.max(8, Math.min(e.clientY + 4, window.innerHeight - needMenu.offsetHeight - 8)) + 'px';
+                setTimeout(() => document.addEventListener('mousedown', onNeedDocDown, true), 0);
+              }
+            }
           }
         });
         cell.addEventListener('click', () => openCellEditor(key, p, ms));
