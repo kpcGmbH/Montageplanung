@@ -3069,11 +3069,12 @@
   // Termine mit eigenen Technikern laufen in der Woche bei der Person zusammen (Typ Kundendienst).
   // Freigabe: die Ansicht gibt es vorerst nur für diese Logins. Die Daten liegen NICHT im gemeinsamen Plan,
   // sondern in einer eigenen Datei der Site (Kundendienst/wartungsvertraege.json) und werden nur hier geladen.
-  const KD_USERS = ['johannes.wahl@kpc-project.com'];
+  // Anmeldename im Microsoft-Konto ist „wahlj@…" (so steht er auch im Verlauf); die Mailadresse zur Sicherheit mit
+  const KD_USERS = ['wahlj', 'johannes.wahl'];
   const KD_FOLDER = 'Kundendienst', KD_FILE = 'wartungsvertraege.json', KD_LOCAL = 'montageplanung_kundendienst';
   const kdLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);   // lokale Entwicklung ohne Anmeldung
   function kdAllowed() {
-    if (window.Cloud && Cloud.isReady()) { const a = String(Cloud.account() || '').toLowerCase(); return KD_USERS.includes(a); }
+    if (window.Cloud && Cloud.isReady()) { const a = String(Cloud.account() || '').toLowerCase().split('@')[0]; return KD_USERS.includes(a); }
     return kdLocalDev;
   }
   const svcList = () => kdData;
