@@ -14,3 +14,8 @@ __pycache__/
 
 # Einmalige Import-Datei (nicht ins Repo)
 import_montageplanung.json
+
+# Kundendaten (Wartungslisten etc.) nie ins Repo
+*.xls
+*.xlsx
+*.csv
