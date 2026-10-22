@@ -56,7 +56,7 @@
   <img src="assets/kpc-logo.png" alt="kpc">
   <div>
     <div class="t">Montageplanung – Anleitung</div>
-    <div class="s">gemeinsame Montage- &amp; Einsatzplanung · Stand Juli 2026</div>
+    <div class="s">gemeinsame Montage- &amp; Einsatzplanung · Stand Oktober 2026</div>
   </div>
 </header>
 
@@ -67,20 +67,22 @@
     <li><a href="#start">Aufrufen &amp; Anmelden</a></li>
     <li><a href="#ueberblick">Überblick &amp; Ansichten</a></li>
     <li><a href="#zeitplan">Zeitplan</a></li>
-    <li><a href="#projekte">Projekte &amp; Bereiche</a></li>
-    <li><a href="#phasen">Montage-Phasen &amp; Monteure</a></li>
+    <li><a href="#projekte">Projekte, Bereiche &amp; Archiv</a></li>
+    <li><a href="#phasen">Einsätze (Phasen) &amp; Monteure</a></li>
     <li><a href="#team">Monteure &amp; Bauleiter</a></li>
     <li><a href="#woche">Wochenansicht</a></li>
     <li><a href="#bedarf">Offener Bedarf &amp; Konflikte</a></li>
-    <li><a href="#undo">Rückgängig &amp; Speichern</a></li>
+    <li><a href="#fuhrpark">Fahrzeuge &amp; Übernachtungen</a></li>
     <li><a href="#termin">Termineinladung</a></li>
+    <li><a href="#kundendienst">Kundendienst</a></li>
+    <li><a href="#undo">Verlauf, Rückgängig &amp; Speichern</a></li>
     <li><a href="#team-arbeit">Zusammenarbeit</a></li>
     <li><a href="#hilfe">Tipps &amp; Problemlösung</a></li>
   </ol>
 </nav>
 
 <main>
-<p class="lead">Die Montageplanung ist eine gemeinsame Web-App zur Planung von Großküchen-Montagen und Serviceeinsätzen. Alle sehen denselben Stand – Änderungen werden sofort für das Team gespeichert (SharePoint). Diese Anleitung führt durch alle Funktionen.</p>
+<p class="lead">Die Montageplanung ist eine gemeinsame Web-App zur Planung von Großküchen-Montagen und Serviceeinsätzen. Alle sehen denselben Stand – Änderungen werden automatisch für das Team gespeichert (SharePoint) und bei den anderen laufend nachgeladen. Diese Anleitung führt durch alle Funktionen.</p>
 
 <section id="start">
   <h2><span class="n">1</span> Aufrufen &amp; Anmelden</h2>
@@ -89,20 +91,22 @@
   <ol class="steps">
     <li>Seite öffnen – es erscheint zuerst der <b>Anmelde-Bildschirm</b> (keine Daten ohne Anmeldung).</li>
     <li>Auf <b>„Mit Microsoft anmelden"</b> klicken und mit dem KPC-Konto anmelden.</li>
-    <li>Danach wird der gemeinsame Plan geladen und angezeigt.</li>
+    <li>Danach wird der gemeinsame Plan geladen; der Zeitplan startet auf der <b>aktuellen Woche</b>.</li>
   </ol>
   <div class="warn"><b>Wichtig:</b> Die App immer in einem <b>normalen Browser-Tab</b> öffnen – nicht in einem kleinen Pop-up-Fenster (z. B. aus einem Teams-/Outlook-Link). In einem eingebetteten Fenster ist keine Microsoft-Anmeldung möglich; die App zeigt dann einen Link „Im normalen Browser-Tab öffnen".</div>
-  <div class="tip"><b>Tipp:</b> Nach einem Update einmal <kbd>Strg</kbd>+<kbd>F5</kbd> drücken (harter Reload), damit die neueste Version geladen wird.</div>
+  <div class="tip"><b>Updates kommen von selbst:</b> Die App prüft beim Start, bei der Rückkehr in den Tab und alle 5 Minuten, ob eine neue Version online ist, und lädt sie. Ist gerade ein Fenster offen oder etwas noch nicht gespeichert, erscheint stattdessen ein Hinweis mit dem Knopf „Jetzt neu laden".</div>
+  <div class="tip"><b>Anmeldung abgelaufen?</b> Mitten in der Arbeit erscheint dann oben „Sitzung abgelaufen" mit dem Knopf <b>„Neu anmelden"</b>. Was du bis dahin geändert hast, bleibt erhalten und wird nach der Anmeldung gespeichert.</div>
 </section>
 
 <section id="ueberblick">
   <h2><span class="n">2</span> Überblick &amp; Ansichten</h2>
-  <p>Oben in der Werkzeugleiste wechselst du zwischen den zwei Hauptansichten:</p>
+  <p>Oben in der Werkzeugleiste wechselst du zwischen den Ansichten:</p>
   <ul>
-    <li><b>Zeitplan</b> – der große Balkenplan (Gantt) über Wochen/Monate: Wer ist wann auf welcher Baustelle?</li>
-    <li><b>Woche</b> – die Wochen-Einsatzplanung: pro Monteur/Bauleiter ein Tagesraster (Mo–Fr) der aktuellen Woche.</li>
+    <li><b>Zeitplan</b> – der große Balkenplan (Gantt) über Wochen/Monate: Welche Montage liegt wann, wer ist eingeplant?</li>
+    <li><b>Woche</b> – die Wochen-Einsatzplanung: pro Monteur/Bauleiter ein Tagesraster der gewählten Woche.</li>
+    <li><b>Kundendienst</b> – Wartungen mit Fälligkeiten und Terminen (vorerst nur für freigegebene Nutzer sichtbar, siehe <a href="#kundendienst">Abschnitt 11</a>).</li>
   </ul>
-  <p>Beide Ansichten greifen auf <b>dieselben Daten</b> zu. Änderungen in der einen wirken sofort in der anderen.</p>
+  <p>Alle Ansichten greifen auf <b>dieselben Daten</b> zu. Änderungen in der einen wirken sofort in der anderen. Wechselst du von der Woche in den Zeitplan, springt dieser auf die Woche, die du gerade angesehen hast.</p>
 </section>
 
 <section id="zeitplan">
@@ -110,51 +114,65 @@
   <p>Der Zeitplan ist in Bereiche gegliedert (Zeilengruppen von oben nach unten):</p>
   <ul>
     <li><b>Auslastung · MT/KW</b> – pro Kalenderwoche die benötigten Monteur-Tage gegenüber der Kapazität (rot = Engpass, grün = frei).</li>
-    <li><b>Ressourcen / Monteure</b> – eine Zeile je Monteur (Urlaub, externe Buchungen).</li>
-    <li><b>Bauleiter</b> – die Bauleitungen.</li>
-    <li><b>Projekte</b> – die Baustellen/Projekte mit ihren Montagefenstern.</li>
+    <li><b>Ressourcen / Monteure</b> – eine Zeile je Monteur (Urlaub, externe Buchungen). Per Klick auf den Kopf auf- und zuklappbar.</li>
+    <li><b>Bauleiter</b> – die Bauleitungen, ebenfalls klappbar.</li>
+    <li><b>Projekte</b> – die Baustellen/Projekte mit ihren Montagefenstern. Die Sammelzeile <b>„Kleinprojekte"</b> steht immer ganz unten.</li>
   </ul>
   <h3>Balken (Montagefenster) bearbeiten</h3>
   <ul>
     <li><b>Doppelklick</b> auf eine leere Stelle einer Zeile = neuer Termin/Balken.</li>
-    <li>Balken <b>ziehen</b> = verschieben; <b>Ränder ziehen</b> = Dauer ändern.</li>
-    <li><b>Klick</b> auf einen Balken = bearbeiten (Bezeichnung, Kategorie, Zeitraum, Montage-Phasen).</li>
+    <li>Balken <b>ziehen</b> = verschieben. Einsätze, eingeplante Monteure und Bauleitung wandern mit; der Verlauf nennt, wer mitverschoben wurde.</li>
+    <li><b>Ränder ziehen</b> = Dauer ändern. Ein Fenster kann nicht kürzer werden als die Einsätze darin.</li>
+    <li><b>Klick</b> auf einen Balken = Editor: Bezeichnung, Kategorie, Zeitraum, Einsätze (Phasen), Bauleiter, Hotel – bei Kleinprojekten auch die Adresse.</li>
+    <li>Im Editor: <b>Duplizieren</b> (Kopie ab dem nächsten Werktag) und <b>✉ Einladung</b> für genau diese Montage.</li>
   </ul>
-  <p>Überlappen sich mehrere Montagefenster in einer Projektzeile, werden sie automatisch <b>untereinander gestapelt</b>, damit alle sichtbar bleiben.</p>
+  <p>Überlappen sich mehrere Montagefenster in einer Projektzeile, werden sie automatisch <b>untereinander gestapelt</b>. Ist ein Monteur am selben Tag doppelt verplant, wird der Balken markiert.</p>
+  <h3>Monteur-Zeilen ein-/ausblenden</h3>
+  <p>Mit <b>„▸ Monteure"</b> blendest du unter jedem Fenster die Zeilen der eingeplanten Monteure ein. Zugeklappt zeigt der Balken eine Kurzinfo: 👤 Anzahl Personen · BL (Bauleitung) · ⚠ offenes Gewerk.</p>
   <h3>Farben / Kategorien</h3>
   <table>
     <tr><th>Farbe</th><th>Bedeutung</th></tr>
     <tr><td><span class="sw" style="background:#62a92f"></span>Grün</td><td>Bestätigter Projekttermin</td></tr>
     <tr><td><span class="sw" style="background:#ec8a2b"></span>Orange</td><td>Vorplanung / noch nicht bestätigt</td></tr>
+    <tr><td><span class="sw" style="background:#7e57c2"></span>Violett</td><td>Bauleitung – Termin nur mit Bauleiter, ohne Monteure</td></tr>
     <tr><td><span class="sw" style="background:#f3d011"></span>Gelb</td><td>Externe Montage (Nachunternehmer)</td></tr>
     <tr><td><span class="sw" style="background:#39c0d8"></span>Cyan</td><td>Urlaub</td></tr>
-    <tr><td><span class="sw" style="background:#b39ddb"></span>Violett</td><td>Externe Trupps (Buchung)</td></tr>
+    <tr><td><span class="sw" style="background:#b39ddb"></span>Hellviolett</td><td>Externe Trupps (Buchung)</td></tr>
   </table>
-  <div class="tip"><b>Tipp:</b> Über die Suchleiste findest du Projekte/Montagen schnell; mit <b>−/+</b> zoomst du die Tagesbreite, mit <b>Heute</b> springst du zum aktuellen Datum.</div>
+  <div class="tip"><b>Tipp:</b> Über die Suchleiste findest du Projekte/Montagen schnell; mit <b>−/+</b> zoomst du die Tagesbreite, mit <b>Heute</b> springst du auf die aktuelle Woche.</div>
 </section>
 
 <section id="projekte">
-  <h2><span class="n">4</span> Projekte &amp; Bereiche</h2>
+  <h2><span class="n">4</span> Projekte, Bereiche &amp; Archiv</h2>
   <ul>
-    <li><b>+ Projekt</b> legt eine neue Projektzeile an (Projektnummer, Ort, Name). Lässt du das Feld „Baustelle" leer, ist es ein Einzelprojekt.</li>
-    <li>Gibst du eine <b>Baustelle</b> an (z. B. „908 Berlin Upbeat"), werden mehrere Zeilen als <b>Bereiche</b> unter dieser Baustelle gruppiert (z. B. EG, 1. OG, MEK). Über <b>＋</b> am Baustellen-Titel fügst du Bereiche hinzu, mit <b>▾</b> klappst du sie ein/aus.</li>
+    <li><b>+ Projekt</b> legt eine neue Projektzeile an (Projektnummer, Ort, Name, Adresse). Lässt du das Feld „Baustelle" leer, ist es ein Einzelprojekt.</li>
+    <li>Gibst du eine <b>Baustelle</b> an (z. B. „908 Berlin Upbeat"), werden mehrere Zeilen als <b>Bereiche</b> unter dieser Baustelle gruppiert (z. B. EG, 1. OG, MEK). Die Bereiche teilen sich die Adresse. Über <b>＋</b> am Baustellen-Titel fügst du Bereiche hinzu, mit <b>▾</b> klappst du sie ein/aus.</li>
     <li><b>Doppelklick</b> auf die Zeilenbeschriftung = Projekt bearbeiten; das <b>✕</b> löscht die Zeile.</li>
+    <li><b>Kleinprojekte</b> (kurze Einsätze ohne eigene Projektzeile) liegen gesammelt in der Zeile „Kleinprojekte". Jeder Balken dort hat seine eigene Bezeichnung und Adresse.</li>
   </ul>
+  <h3>Archiv</h3>
+  <p>Abgeschlossene Projekte legst du mit <b>📦</b> an der Projektzeile bzw. am Baustellen-Kopf ins Archiv. Sie verschwinden aus dem Plan und zählen nirgends mehr mit. Der Knopf <b>„Archiv (N)"</b> blendet sie wieder ein; mit <b>↩</b> holst du ein Projekt zurück.</p>
 </section>
 
 <section id="phasen">
-  <h2><span class="n">5</span> Montage-Phasen &amp; Monteure zuordnen</h2>
-  <p>Der Hauptbalken ist nur das <b>Montagefenster</b> (der Zeitraum). Wer konkret was macht, steckt in den <b>Phasen</b>. Klicke einen Fensterbalken an und lege im Editor Phasen an:</p>
+  <h2><span class="n">5</span> Einsätze (Phasen) &amp; Monteure zuordnen</h2>
+  <p>Der Hauptbalken ist nur das <b>Montagefenster</b> – der grobe Rahmen aus dem Projektzeitplan. Wer konkret wann was macht, steckt in den <b>Einsätzen (Phasen)</b>. Ein Fenster ohne Phase hat keine Personen und erzeugt keinen Bedarf. Klicke einen Fensterbalken an und lege im Editor mit <b>+ Phase</b> Einsätze an:</p>
   <ul>
-    <li>Jede <b>Phase = Gewerk + Zeitraum + Anzahl + zugeordnete Monteure</b> (z. B. „Edelstahl, 06.–10.07., 2 Personen: Ivan, Milenko").</li>
-    <li>In der Monteur-Auswahl erscheinen nur <b>qualifizierte</b> Monteure (nach Gewerk gefiltert).</li>
-    <li>Unter dem Fensterbalken erscheint <b>je Monteur eine Zeile</b>, genau über seine Tage gezogen und in der Gewerkfarbe. Eine gestrichelte, kursive Zeile <b>„(offen)"</b> zeigt Tage, an denen das Gewerk noch nicht (voll) besetzt ist.</li>
+    <li>Jede Phase = <b>Gewerk + Start + Anzahl Montagetage + Personenzahl + Monteure</b> (z. B. „Edelstahl, ab 06.07., 4 Tage, 2 Personen: Ivan, Milenko"). Das Ende wird daraus berechnet.</li>
+    <li><b>Halbe Tage</b> sind möglich (z. B. 2,5): Der letzte Tag ist dann ein halber Tag („½ Tag" in der Woche).</li>
+    <li>Gezählt werden Werktage Mo–Fr. Mit dem Häkchen <b>Sa/So</b> zählen auch Wochenendtage.</li>
+    <li>Das Häkchen <b>🌙</b> markiert eine Montage mit Übernachtung (siehe <a href="#fuhrpark">Abschnitt 9</a>).</li>
+    <li>In der Monteur-Auswahl erscheinen nur <b>qualifizierte</b> Monteure (nach Gewerk gefiltert). Ist jemand nur an einzelnen Tagen eingeplant, ist sein Häkchen „halb" gesetzt und die Tage stehen dabei.</li>
+    <li><b>Bauleiter</b> fügst du im selben Editor als Chips hinzu.</li>
+    <li>Fallen beim Speichern durch einen geänderten Zeitraum tageweise Einsätze weg, <b>fragt die App nach</b> und nennt Namen und Tage.</li>
   </ul>
+  <div class="tip"><b>Regel:</b> Ein Fenster umfasst immer alle seine Einsätze. Liegt ein Einsatz außerhalb, wird das Fenster erweitert – oder es entsteht ein eigenes Fenster.</div>
   <table>
     <tr><th>Gewerk</th><th>Kürzel</th></tr>
     <tr><td>Edelstahlmonteur</td><td>Ed</td></tr>
-    <tr><td>Sanitär / Kleine Sanitäranschlüsse</td><td>S</td></tr>
-    <tr><td>Elektriker</td><td>El / E</td></tr>
+    <tr><td>Sanitär</td><td>S</td></tr>
+    <tr><td>Kleine Sanitäranschlüsse</td><td>Sk</td></tr>
+    <tr><td>Elektriker</td><td>E</td></tr>
     <tr><td>Lagerist</td><td>La</td></tr>
     <tr><td>Eintransporthelfer (extern)</td><td>Et</td></tr>
   </table>
@@ -164,20 +182,44 @@
   <h2><span class="n">6</span> Monteure &amp; Bauleiter verwalten</h2>
   <h3>Monteure</h3>
   <p>Über <b>Monteure</b> (Werkzeugleiste) verwaltest du das Team: Name, Typ <b>intern/extern</b>, bei Externen die <b>Truppstärke</b>, und die <b>Gewerke</b> (anklickbare Chips – so wird jemand als Elektriker, Sanitär, Edelstahl … klassifiziert). Oben siehst du die Kapazität (Monteur-Tage/Woche) und die Verteilung der Qualifikationen.</p>
-  <div class="tip"><b>Neuen Monteur mit Gewerk anlegen:</b> auch über <b>+ Ressource → „Einzel-Monteur (Person)"</b> möglich – dort Typ (intern/extern) wählen und die Gewerk-Chips setzen. Das legt einen echten, zuweisbaren Monteur an (nicht nur eine Kapazitätszeile).</div>
+  <ul>
+    <li>Ein externer Trupp mit Truppstärke 2 deckt einen Bedarf von 2 Personen.</li>
+    <li>Stellst du jemanden von intern auf extern (oder umgekehrt) um, fragt die App vorher – Urlaub und Buchungen werden dabei umgedeutet.</li>
+    <li>Entfernst du einen Monteur, werden auch seine Einsätze, Wochen-Einträge, Fahrzeug- und Übernachtungs-Angaben ausgetragen.</li>
+  </ul>
+  <div class="tip"><b>Neuen Monteur mit Gewerk anlegen:</b> auch über <b>+ Ressource → „Einzel-Monteur (Person)"</b> möglich – dort Typ (intern/extern) wählen und die Gewerk-Chips setzen.</div>
   <h3>Bauleiter</h3>
-  <p>Über <b>Bauleiter</b> legst du Bauleitungen an/um/entfernst sie. Sie erscheinen als eigene Zeilen im Zeitplan und in der Woche.</p>
+  <p>Über <b>Bauleiter</b> legst du Bauleitungen an, benennst sie um oder entfernst sie. Sie erscheinen als eigene Zeilen im Zeitplan und in der Woche (violett).</p>
   <h3>Ressourcen-Zeilen</h3>
   <p><b>+ Ressource</b> erzeugt Kapazitäts-/Infozeilen (z. B. Sammel-Urlaub −1, externe Trupps +1, reine Infozeilen).</p>
 </section>
 
 <section id="woche">
   <h2><span class="n">7</span> Wochenansicht</h2>
-  <p>Die Woche wird <b>live aus dem Zeitplan abgeleitet</b>: Jede Person hat ein Mo–Fr-Raster. Baustellen-Einsätze kommen automatisch aus den Montage-Phasen. Mit <b>‹ ›</b> und <b>Diese Woche</b> navigierst du.</p>
-  <h3>Manuelle Einträge (Palette)</h3>
-  <p>Über die farbigen Chips oben ziehst du Zusätze in eine Zelle – oder klickst eine Zelle an und wählst den Typ:</p>
+  <p>Die Woche wird <b>live aus dem Zeitplan abgeleitet</b>. Mit <b>‹ ›</b> und <b>Diese Woche</b> navigierst du; die heutige Spalte ist hervorgehoben. Die Woche ist in Bereiche mit farbigem Kopf gegliedert – ein Klick auf den Kopf klappt den Bereich ein oder aus:</p>
+  <ul>
+    <li><b>Baustellen · Montagen diese Woche</b> (grün) – alle Montagen der Woche mit Besetzung je Tag:
+      <span class="pill" style="background:#62a92f">grün</span> besetzt,
+      <span class="pill" style="background:#e04b3f">rot</span> Einsatz ohne Monteur,
+      <span class="pill" style="background:#8a8f96">grau</span> Fenster ohne Einsatz,
+      <span class="pill" style="background:#ec8a2b">orange „?"</span> noch nicht bestätigt, aber schon jemand eingeplant.
+      🌙 mit Zahl = Anzahl Übernachtungen.</li>
+    <li><b>Offener Bedarf</b> (gelb) – siehe <a href="#bedarf">Abschnitt 8</a>.</li>
+    <li><b>Monteure</b> (blau) – mit Gewerk-Kürzel am Namen. In der Zelle stehen Baustelle bzw. Termin, „½ Tag", 🌙, die Fahrzeug-Marke und <b>✉</b> für die Einladung des passenden Gewerks.</li>
+    <li><b>Bauleitung</b> (violett).</li>
+    <li><b>Fahrzeuge</b> – wer an welchem Tag mit welchem Fahrzeug fährt.</li>
+  </ul>
+  <h3>Zelle bearbeiten</h3>
+  <p>Klick auf eine Zelle öffnet die Zellen-Maske. Dort kannst du:</p>
+  <ul>
+    <li>eine oder <b>mehrere Baustellen</b> für den Tag wählen (<b>+ Baustelle</b> – das trägt den Einsatz direkt im Zeitplan ein),</li>
+    <li>zusätzlich einen <b>Termin</b> setzen (siehe Tabelle),</li>
+    <li>Fahrzeug und Übernachtung für diesen Tag ändern,</li>
+    <li>bei Kleinprojekten Bezeichnung und Adresse pflegen,</li>
+    <li>mit <b>Ganze Woche</b> den Eintrag auf alle Werktage der Person übertragen, mit <b>Kopieren</b> / <b>Einfügen</b> in eine andere Zelle übernehmen.</li>
+  </ul>
   <table>
-    <tr><th>Typ</th><th>Verwendung</th></tr>
+    <tr><th>Termin</th><th>Verwendung</th></tr>
     <tr><td><span class="pill" style="background:#3d7ec9">Montage</span></td><td>Montage-Vermerk (manuell)</td></tr>
     <tr><td><span class="pill" style="background:#7e57c2">Bauleitung</span></td><td>Bauleitung vor Ort</td></tr>
     <tr><td><span class="pill" style="background:#2f9e8f">Kundendienst</span></td><td>Servicefahrt / Kundendienst</td></tr>
@@ -185,66 +227,113 @@
     <tr><td><span class="pill" style="background:#8a8f96">Büro</span></td><td>Büro / Info</td></tr>
     <tr><td><span class="pill" style="background:#f4645a">n.v.</span> / <span class="pill" style="background:#f4645a">frei</span></td><td>nicht verfügbar / frei (Urlaub)</td></tr>
   </table>
-  <div class="tip"><b>„Ganze Woche":</b> Im Zellen-Editor überträgt der Button den Eintrag auf alle Werktage (Mo–Fr) dieser Person – ideal, um z. B. eine Bauleitung mit einem Klick die ganze Woche auf eine Baustelle zu setzen.</div>
-  <h3>Einsätze verschieben (Drag &amp; Drop)</h3>
+  <div class="tip"><b>Nur „frei" und „n.v." geben einen Einsatz frei.</b> Alle anderen Termine stehen <b>neben</b> der Baustelle in der Zelle – die Person bleibt dort eingeplant.</div>
+  <h3>Ziehen &amp; Kopieren</h3>
   <ul>
-    <li>Einen Einsatz auf einen <b>anderen Tag derselben Person</b> ziehen = der <b>ganze Einsatz</b> verschiebt sich um diese Tage – der Balken im Zeitplan wandert mit.</li>
-    <li>Einen Einsatz auf eine <b>andere Person</b> ziehen = <b>Übergabe</b> genau dieses Tages an die andere Person.</li>
+    <li>Einsatz auf eine <b>andere Person</b> ziehen = <b>Übergabe</b> genau dieses Tages an die andere Person.</li>
+    <li>Einsatz auf einen <b>anderen Tag</b> ziehen = Rückfrage: <b>„Nur diese Person"</b> oder <b>„Ganzen Einsatz verschieben"</b> (dann wandert der Balken im Zeitplan mit).</li>
+    <li>Monteur-Einsätze lassen sich nicht auf die Bauleitung ziehen.</li>
+    <li><b>Rechtsklick auf einen Namen</b> = ganze Woche dieser Person kopieren bzw. bei einer anderen Person einfügen.</li>
   </ul>
+  <h3>Monteure als Bild</h3>
+  <p><b>📷 Monteure als Bild</b> erzeugt ein Bild nur der Monteur-Zeilen dieser Woche – zum Kopieren (z. B. in eine Mail oder WhatsApp) oder Speichern als PNG.</p>
 </section>
 
 <section id="bedarf">
   <h2><span class="n">8</span> Offener Bedarf &amp; Konflikte (Woche)</h2>
   <p>Die Woche macht Planungslücken sofort sichtbar:</p>
   <ul>
-    <li><b>Offener Bedarf</b> (oben, gestrichelte Zellen „N× Gewerk"): Ein Gewerk ist gefordert, aber noch nicht besetzt. <b>Klick</b> auf die Zelle → Auswahl qualifizierter Monteure → direkt besetzen.</li>
+    <li><b>Offener Bedarf</b> („N× Gewerk"): Ein Einsatz fordert Personen, die noch nicht eingeplant sind. <b>Klick</b> auf die Zelle öffnet den Editor des Montagefensters – dort die Monteure zuordnen.</li>
     <li><b>Geteilter Tag</b> (blau gestreift, „Baustelle A / Baustelle B"): ein Monteur an mehreren Baustellen am selben Tag – gewollt, kein Fehler.</li>
-    <li><span class="pill" style="background:#f4645a">Rot</span> = <b>Konflikt</b>: als „frei" markiert, aber Einsatz geplant – oder eine manuelle Notiz über einem geplanten Einsatz.</li>
+    <li><span class="pill" style="background:#f4645a">Rot</span> = <b>Konflikt</b>: als „frei" markiert, aber ein Einsatz geplant.</li>
     <li><b>Orange gestreift</b> = der zugrunde liegende Termin ist <b>noch nicht bestätigt</b> (Vorplanung).</li>
-    <li><b>Überschreibung:</b> Setzt du einen verplanten Monteur manuell auf etwas anderes (z. B. Kundendienst), wird die Zelle rot markiert (↷) <b>und</b> der freigewordene Einsatz erscheint automatisch als offener Bedarf.</li>
+    <li><b>Überschreibung:</b> Setzt du einen verplanten Monteur auf „frei" oder „n.v.", wird die Zelle rot markiert (↷) <b>und</b> der freigewordene Einsatz erscheint als offener Bedarf.</li>
   </ul>
 </section>
 
-<section id="undo">
-  <h2><span class="n">9</span> Rückgängig, Wiederholen &amp; Speichern</h2>
+<section id="fuhrpark">
+  <h2><span class="n">9</span> Fahrzeuge &amp; Übernachtungen</h2>
+  <h3>Fahrzeuge</h3>
   <ul>
-    <li><b>↶ Rückgängig</b> / <b>↷</b> in der Werkzeugleiste, oder <kbd>Strg</kbd>+<kbd>Z</kbd> bzw. <kbd>Strg</kbd>+<kbd>Umschalt</kbd>+<kbd>Z</kbd>. Deckt alle Änderungen ab (Balken, Phasen, Zuordnungen, Wochen-Einträge).</li>
-    <li><b>Speichern passiert automatisch:</b> Jede Änderung wird sofort in den gemeinsamen Plan (SharePoint) geschrieben.</li>
-    <li>Mit <b>↻ Laden</b> holst du den aktuellen Stand der Kolleg:innen neu.</li>
+    <li>Jedes Firmenfahrzeug hat einen <b>Stammfahrer</b>. An dessen Einsatztagen ist das Fahrzeug automatisch gesetzt.</li>
+    <li>Fährt jemand bei einem Kollegen <b>mit</b>, wählst du in der Zellen-Maske dessen Fahrzeug. Sitzen mehr Personen darin als es Sitze hat, wird die Fahrzeug-Marke <b>rot</b>.</li>
+    <li>Der Bereich <b>Fahrzeuge</b> in der Woche zeigt je Tag, wer womit fährt.</li>
   </ul>
+  <h3>Übernachtungen</h3>
+  <ul>
+    <li>Ist an einem Einsatz <b>🌙</b> angehakt, gilt jede Nacht als Übernachtung, auf die ein weiterer Einsatztag folgt. Das Wochenende zählt nicht – außer bei Einsätzen mit Sa/So.</li>
+    <li>In der Woche lässt sich die Übernachtung je Person und Tag ändern; „Ganze Woche" setzt die Nächte Mo–Do.</li>
+    <li>Das <b>Hotel</b> trägst du im Editor des Montagefensters ein.</li>
+  </ul>
+  <div class="warn"><b>Hinweis:</b> Wird ein Einsatz verschoben, wandern von Hand geänderte Fahrzeug- und Übernachtungs-Angaben nicht mit – bitte danach kurz prüfen.</div>
 </section>
 
 <section id="termin">
   <h2><span class="n">10</span> Termineinladung</h2>
-  <p>Zu jedem Projekt kannst du direkt eine <b>Termineinladung</b> erstellen:</p>
+  <p>Aus der Planung erstellst du direkt die <b>Termineinladung</b> für Monteure bzw. Servicefirmen – auf drei Ebenen:</p>
+  <ul>
+    <li><b>Projekt</b> – im Zeitplan mit der Maus über die Projektzeile fahren und auf <b>✉</b> klicken.</li>
+    <li><b>Einzelne Montage</b> (z. B. Kleinprojekt) – im Editor des Balkens auf <b>✉ Einladung</b>.</li>
+    <li><b>Einzelnes Gewerk</b> – <b>✉</b> an der Phase im Editor oder in der Wochenzelle. Steht eine Person in mehreren Gewerken, gibt es eine gemeinsame Einladung.</li>
+  </ul>
   <ol class="steps">
-    <li>Im Zeitplan mit der Maus über eine Projektzeile fahren und auf das <b>✉‑Symbol</b> klicken.</li>
-    <li>Das Formular öffnet sich – <b>vorbefüllt</b> aus den Projektdaten (Name, Nummer, Ort, Datum/Zeitraum).</li>
-    <li>Restliche Felder ausfüllen (Einsatzart, Zugang, Arbeitsauftrag, Geräte, Ansprechpartner …).</li>
-    <li>Ausgabe: <b>„Für Outlook kopieren"</b> (fertiger E-Mail-Text), <b>Word (.doc)</b> oder <b>Text (.txt)</b>.</li>
-    <li><b>„Zwischenstand speichern"</b> legt den Stand pro Projekt in SharePoint ab (Ordner <code>Termineinladungen/</code>). Öffnest du dasselbe Projekt später wieder, wird der Zwischenstand automatisch geladen.</li>
+    <li>Das Formular öffnet sich <b>vorbefüllt</b>: Projektdaten, Zeitraum, Monteure, Fahrzeug mit Insassen und Übernachtung. Was du von Hand änderst, bleibt beim nächsten Öffnen erhalten.</li>
+    <li>Einsatzart wählen: Inbetriebnahme/Einweisung, Wartung, Reparatur, Montage/Aufbau, Demontage, Anschlussarbeiten Sanitär, Anschlussarbeiten Elektro, Restarbeiten.</li>
+    <li><b>Adresse, Ansprechpartner, Zugang/Parken und OneDrive-Link</b> gelten projektweit: einmal eintragen, dann stehen sie in allen Einladungen des Projekts.</li>
+    <li>Ausgabe: <b>„Für Outlook kopieren"</b> (fertiger E-Mail-Text) oder <b>Word</b>.</li>
+    <li>Der Entwurf wird in SharePoint gespeichert (Ordner <code>Termineinladungen/</code>) und beim nächsten Öffnen wieder geladen.</li>
     <li>Über <b>„← Zurück zum Zeitplan"</b> geht es zurück.</li>
   </ol>
+  <div class="tip"><b>Automatisch dabei:</b> der Verweis auf die <a href="https://kpcgmbh.github.io/Montagefortschritt/">Montagefortschritt-App</a> (außer bei Wartung und Reparatur) und bei Inbetriebnahmen die Aufgabe „Ausfüllen der Inbetriebnahme- und Einweisungsprotokolle".</div>
+</section>
+
+<section id="kundendienst">
+  <h2><span class="n">11</span> Kundendienst</h2>
+  <p>Die Ansicht <b>Kundendienst</b> ist vorerst nur für freigegebene Nutzer sichtbar. Sie ersetzt die bisherige Excel-Wartungsliste und zeigt Wartungsverträge mit Fälligkeiten und Terminen.</p>
+  <ul>
+    <li><b>Zu tun</b> – oben die überfälligen und bald fälligen Wartungen, für die noch kein Termin steht.</li>
+    <li><b>Raster über 16 Monate</b> mit Ampel: <span class="pill" style="background:#e04b3f">rot</span> überfällig, <span class="pill" style="background:#e0b020;color:#3a3000">gelb</span> bald fällig, <span class="pill" style="background:#62a92f">grün</span> später fällig, <span class="pill" style="background:#3d7ec9">blau</span> Termin, ✓ erledigt. Im Monatskopf steht die Anzahl fälliger Wartungen und Termine.</li>
+    <li>Verträge desselben Objekts (Ort + PNr) stehen als <b>Gruppe</b> zusammen; für die ganze Gruppe lässt sich ein <b>Sammeltermin</b> eintragen.</li>
+    <li>Spalten <b>Stand</b>, <b>Letzte</b> und <b>Nächste</b> Wartung. Sortierung nach <b>Ort</b> oder <b>Fälligkeit</b>.</li>
+    <li><b>Stand</b> je Vertrag: offen → anfragen → angefragt → beauftragt → terminiert (sobald ein Termin eingetragen ist).</li>
+    <li>Fehlende Angaben (Intervall, Fälligkeit) sind mit <b>⚠</b> markiert und lassen sich filtern. Beendete Verträge sind ausgeblendet (Filter „beendete / inaktive").</li>
+  </ul>
+  <div class="tip"><b>Nächste Fälligkeit:</b> Hakst du einen Termin als „erledigt" ab, rechnet die App ab dem Monat der Wartung + 12 Monate (1× jährlich), + 6 (2×) bzw. + 3 (4×). Eine von Hand eingetragene spätere Fälligkeit bleibt stehen.</div>
+  <p>Termine mit eigenen Technikern erscheinen zusätzlich in der <b>Woche</b> bei der Person.</p>
+</section>
+
+<section id="undo">
+  <h2><span class="n">12</span> Verlauf, Rückgängig &amp; Speichern</h2>
+  <ul>
+    <li><b>Speichern passiert automatisch:</b> Jede Änderung wird in den gemeinsamen Plan (SharePoint) geschrieben. Den Stand siehst du oben in der Statuszeile („gespeichert 14:32").</li>
+    <li>Änderungen der Kolleg:innen werden <b>alle 15 Sekunden</b> und bei der Rückkehr in den Tab nachgeladen und mit deinen zusammengeführt. Solange ein Bearbeitungs-Fenster offen ist, wartet der Abgleich.</li>
+    <li><b>↶ Rückgängig</b> / <b>↷</b> in der Werkzeugleiste, oder <kbd>Strg</kbd>+<kbd>Z</kbd> bzw. <kbd>Strg</kbd>+<kbd>Umschalt</kbd>+<kbd>Z</kbd>. Rückgängig nimmt <b>nur deine eigenen</b> Änderungen zurück – Einträge anderer bleiben stehen. Eine Aktion aus mehreren Teilen zählt als ein Schritt.</li>
+    <li><b>🕘 Verlauf</b> zeigt, wer wann was geändert hat – mit Filter nach Zeitplan und Woche.</li>
+    <li>Mit <b>↻ Laden</b> holst du den aktuellen Stand sofort; deine ungespeicherten Änderungen bleiben dabei erhalten.</li>
+  </ul>
+  <div class="tip"><b>Nichts geht verloren:</b> Schlägt das Speichern fehl (z. B. kein Netz), versucht die App es nach 20 Sekunden erneut. Wird der Browser vorher geschlossen, werden die Änderungen beim nächsten Start übernommen.</div>
 </section>
 
 <section id="team-arbeit">
-  <h2><span class="n">11</span> Zusammenarbeit / gemeinsame Daten</h2>
+  <h2><span class="n">13</span> Zusammenarbeit / gemeinsame Daten</h2>
   <p>Alle Daten liegen zentral in <b>SharePoint</b> und sind nur nach Microsoft-Anmeldung sichtbar. Voraussetzungen, damit ein:e Kolleg:in mitarbeiten kann:</p>
   <ul>
     <li>Mitglied der SharePoint-Site <b>Montageplanung</b> sein (durch die IT/Johannes freigegeben).</li>
     <li>Die App-URL im <b>normalen Browser-Tab</b> öffnen und <b>anmelden</b>.</li>
   </ul>
-  <p>Danach sehen alle denselben Stand; Änderungen sind sofort für alle da.</p>
+  <p>Danach sehen alle denselben Stand. Arbeiten zwei gleichzeitig, werden ihre Änderungen zusammengeführt.</p>
 </section>
 
 <section id="hilfe">
-  <h2><span class="n">12</span> Tipps &amp; Problemlösung</h2>
+  <h2><span class="n">14</span> Tipps &amp; Problemlösung</h2>
   <table>
     <tr><th>Problem</th><th>Lösung</th></tr>
     <tr><td>Anmeldung geht nicht / Fehlermeldung</td><td>Im <b>normalen Tab</b> öffnen (nicht im kleinen Pop-up). Bei „eingebettetem Fenster" den angezeigten Link „Im normalen Browser-Tab öffnen" nutzen.</td></tr>
-    <tr><td>Alte Version / Änderung fehlt</td><td>Hart neu laden: <kbd>Strg</kbd>+<kbd>F5</kbd> (ggf. Browser-Cache leeren).</td></tr>
+    <tr><td>„Sitzung abgelaufen"</td><td>Oben auf <b>„Neu anmelden"</b> klicken – Ungespeichertes bleibt erhalten.</td></tr>
+    <tr><td>Hinweis „Neue Version"</td><td>Offene Fenster schließen und auf <b>„Jetzt neu laden"</b> klicken.</td></tr>
     <tr><td>Kolleg:in sieht andere Daten</td><td>Sicherstellen, dass er/sie <b>angemeldet</b> und <b>Mitglied der SharePoint-Site</b> ist; dann <b>↻ Laden</b>.</td></tr>
-    <tr><td>Versehentliche Änderung</td><td><kbd>Strg</kbd>+<kbd>Z</kbd> (Rückgängig).</td></tr>
+    <tr><td>Versehentliche Änderung</td><td><kbd>Strg</kbd>+<kbd>Z</kbd> (Rückgängig) – oder im <b>🕘 Verlauf</b> nachsehen, was geändert wurde.</td></tr>
+    <tr><td>Projekt ist verschwunden</td><td>Prüfen, ob es im <b>Archiv</b> liegt („Archiv (N)" einblenden).</td></tr>
     <tr><td>Genauer Fehlertext</td><td>Steht rot im Anmelde-Bildschirm bzw. in der Statuszeile – an die IT/Johannes weitergeben.</td></tr>
   </table>
 </section>
