@@ -3070,7 +3070,7 @@
   // Freigabe: die Ansicht gibt es vorerst nur für diese Logins. Die Daten liegen NICHT im gemeinsamen Plan,
   // sondern in einer eigenen Datei der Site (Kundendienst/wartungsvertraege.json) und werden nur hier geladen.
   // Anmeldename im Microsoft-Konto ist „wahlj@…" (so steht er auch im Verlauf); die Mailadresse zur Sicherheit mit
-  const KD_USERS = ['wahlj', 'johannes.wahl', 'wahlc', 'carolin.wahl'];
+  const KD_USERS = ['wahlj', 'johannes.wahl', 'wahlc', 'carolin.wahl', 'hose'];
   const KD_FOLDER = 'Kundendienst', KD_FILE = 'wartungsvertraege.json', KD_LOCAL = 'montageplanung_kundendienst';
   const kdLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);   // lokale Entwicklung ohne Anmeldung
   function kdAllowed() {
