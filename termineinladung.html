@@ -282,7 +282,8 @@ const EINTRANSPORT = ["ebenerdig","Treppen müssen überbrückt werden","Rampe m
 
 const TAETIGKEITEN = [
   { key:"kuehlzelle", label:"Kühlzellenmontage",
-    tools:["Ausgleichmaterial (Kunststoff weiß)","Kreuzlinienlaser","Schutzfolie","Klebeband","Bohrer","Kronenbohrer","Akkunietzange","Plattenwagen","Silikon"],
+    tools:["Ausgleichmaterial (Kunststoff weiß)","Kreuzlinienlaser","Schutzfolie","Hartfaserplatten","Klebeband","Bohrer","Kronenbohrer","Akkunietzange","Plattenwagen","Silikon"],
+    fixed:["Schützen der Kühlzelle mit Hartfaserplatten"],   // immer dabei, nicht abwählbar
     items:["Unterlegplatten 30mm","Unterlegplatten 10mm"] },
   { key:"hauben", label:"Haubenmontage",
     tools:["Haubenheber","Gewindestäbe","Gewindehülsen","Unterlegscheiben","Hutmuttern","Betonschrauben","Silikon","Leiter"],
@@ -419,6 +420,11 @@ TAETIGKEITEN.forEach(t=>{
     ta.addEventListener("input", render); detail.appendChild(ta);
   } else {
     const cl = document.createElement("div"); cl.className="cklist";
+    (t.fixed||[]).forEach(it=>{   // feste Punkte: immer angehakt, ohne Schlüssel → nicht im Entwurf gespeichert
+      const lab = document.createElement("label"); lab.title = "Standardpunkt – immer in der Einladung";
+      lab.innerHTML = `<input type="checkbox" checked disabled> <span>${esc(it)}</span>`;
+      cl.appendChild(lab);
+    });
     t.items.forEach((it,idx)=>{
       const lab = document.createElement("label");
       lab.innerHTML = `<input type="checkbox" data-it="${t.key}:${idx}"> <span>${esc(it)}</span>`;
@@ -588,7 +594,7 @@ function buildText(){
       sec("Geplante Tätigkeiten / Leistungsumfang");
       taets.forEach(t=>{
         const items = t.freitext ? (($("rest_text") ? $("rest_text").value : "").split("\n").map(x=>x.trim()).filter(Boolean))
-          : taetCheckedItems(t).concat(taetSonst(t.key) ? [taetSonst(t.key)] : []);
+          : (t.fixed||[]).concat(taetCheckedItems(t), taetSonst(t.key) ? [taetSonst(t.key)] : []);
         if (!items.length) { L.push("- " + t.label); return; }   // ohne Details: als Listenpunkt statt leerer Überschrift
         L.push(t.label + ":");
         items.forEach(it=>L.push("- "+it));
