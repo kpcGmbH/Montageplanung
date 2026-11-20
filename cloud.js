@@ -42,6 +42,7 @@ window.Cloud = (function () {
   }
 
   let msalApp = null, msalAccount = null, siteId = null, etag = null;
+  let loadedOk = false;
   let applyFn = null, statusFn = null, saveTimer = null, pendingSnap = null;
   let snapFn = null, baseSnap = null, syncing = false, pollTimer = null;   // Auto-Merge/Live-Sync
 
@@ -141,14 +142,14 @@ window.Cloud = (function () {
   function stashUnsaved() { rememberUnsaved(snapFn ? snapFn() : null); }
   async function restoreUnsaved() {
     let st = null;
-    try { st = JSON.parse(localStorage.getItem(UNSAVED_KEY) || sessionStorage.getItem(UNSAVED_KEY) || 'null'); clearUnsaved(); } catch (e) { return; }
-    if (!st || !st.local || !baseSnap || Date.now() - (st.ts || 0) > 3 * 24 * 3600 * 1000) return;
+    try { st = JSON.parse(localStorage.getItem(UNSAVED_KEY) || sessionStorage.getItem(UNSAVED_KEY) || 'null'); } catch (e) { return; }
+    if (!st || !st.local || !baseSnap || Date.now() - (st.ts || 0) > 3 * 24 * 3600 * 1000) { if (st && st.local && baseSnap) clearUnsaved(); return; }
     if (st.user && msalAccount && st.user !== msalAccount.username) return;   // fremdes Konto (gemeinsamer PC) → nicht übernehmen
     const merged = merge3(st.base || baseSnap, st.local, baseSnap, true);   // im Konflikt gilt der neuere Stand der anderen
-    if (eq(merged, baseSnap)) return;
+    if (eq(merged, baseSnap)) { clearUnsaved(); return; }
     if (applyFn) applyFn(clone(merged), 'merge');
-    await push(merged);
-    setStatus('Änderungen von vor der Anmeldung übernommen ' + hhmm(), 'ok');
+    try { await push(merged); setStatus('Änderungen von vor der Anmeldung übernommen ' + hhmm(), 'ok'); }   // push löscht die Sicherung erst bei Erfolg
+    catch (e) { if (!e.relogin) { pendingSnap = merged; clearTimeout(retryTimer); retryTimer = setTimeout(flushSave, 20000); } }
   }
   function reloginError() {
     needRelogin = true;
@@ -195,15 +196,22 @@ window.Cloud = (function () {
   async function pull(initial, force) {
     await resolveSite();
     const r = await graph(planPath());
-    if (r.status === 404) { etag = null; baseSnap = null; setStatus('angemeldet · noch keine Cloud-Daten', 'ok'); return null; }
+    if (r.status === 404) { etag = null; baseSnap = null; loadedOk = true; setStatus('angemeldet · noch keine Cloud-Daten', 'ok'); return null; }
     if (!r.ok) throw new Error('Laden fehlgeschlagen (' + r.status + ')');
     const newEtag = r.headers.get('ETag') || r.headers.get('etag');
     if (!initial && !force && baseSnap && newEtag && newEtag === etag) return null;   // nichts Neues am Server
     const remote = await r.json();
+    // Während des Ladens wurde ein Dialog geöffnet / ein Balken gezogen → jetzt nicht austauschen, beim nächsten Abgleich
+    if (!initial && !canSyncFn()) return null;
     let toApply, hadLocal = false;
-    if (initial || !baseSnap) { toApply = remote; }
+    if (initial) { toApply = remote; }
+    else if (!baseSnap) {
+      // Erstes Laden war fehlgeschlagen: lokalen Stand (evtl. alt) nicht verwerfen, aber auch nicht über die Cloud legen –
+      // vereinigen, im Konflikt gilt der Serverstand
+      const local = snapFn ? snapFn() : remote; toApply = merge3({}, local, remote, true); hadLocal = !eq(toApply, remote);
+    }
     else { const local = snapFn ? snapFn() : remote; toApply = merge3(baseSnap, local, remote); hadLocal = !eq(toApply, remote); }
-    baseSnap = remote; etag = newEtag;
+    baseSnap = remote; etag = newEtag; loadedOk = true;
     if (applyFn) applyFn(clone(toApply), initial ? 'init' : 'merge');
     setStatus((initial ? 'geladen ' : 'aktualisiert ') + hhmm(), 'ok');
     if (hadLocal) { try { await push(toApply); } catch (e) { /* nächster Sync versucht es erneut */ } }
@@ -211,12 +219,13 @@ window.Cloud = (function () {
   }
 
   async function push(snap, noMerge) {
+    if (!loadedOk) { const err = new Error('Plan noch nicht geladen – Speichern wartet'); err.deferred = true; throw err; }   // nie ohne Basis/ETag überschreiben
     await resolveSite();
     const headers = { 'Content-Type': 'application/json' };
     if (etag) headers['If-Match'] = etag;
     const r = await graph(planPath(), { method: 'PUT', headers, body: JSON.stringify(snap) });
     if (r.status === 412) {   // jemand anderes hat gespeichert → zusammenführen (bei offenem Dialog erst danach)
-      if (noMerge) { const err = new Error('später zusammenführen'); err.deferred = true; throw err; }
+      if (noMerge || !canSyncFn()) { const err = new Error('später zusammenführen'); err.deferred = true; throw err; }
       return await mergeAndRetry(0);
     }
     if (!r.ok) throw new Error('Speichern fehlgeschlagen (' + r.status + ')');

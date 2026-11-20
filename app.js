@@ -111,6 +111,9 @@
   }
   // Taggenaue Zuordnungen außerhalb ihrer Phase (z. B. nach dem Kürzen eines Fensters oder Ziehen in der Woche):
   // direkt angrenzend → Phase verlängern; mit Lücke → eigenes Montagefenster, damit kein Bedarf in der Lücke entsteht.
+  // Vor dem Verlängern einer Phase: „ganze Phase"-Zuordnungen auf den bisherigen Zeitraum festschreiben,
+  // sonst wären diese Monteure plötzlich auch an den neuen Tagen eingeplant
+  function pinWhole(ph) { ph.assigned = (ph.assigned || []).map(a => (typeof a === 'string' ? { id: a, start: ph.start, end: ph.end } : a)); }
   function splitStray(row, bar) {
     const day = (iso, n) => isoStr(addDays(parse(iso), n));
     const made = [];
@@ -132,7 +135,7 @@
         if (!segs.length) return;
         const gs = segs.map(x => x.start).sort()[0], ge = segs.map(x => x.end).sort().pop();
         const gap = isAfter ? workBetween(day(ph.end, 1), day(gs, -1)) : workBetween(day(ge, 1), day(ph.start, -1));
-        if (!gap) { if (isAfter) ph.end = ge; else ph.start = gs; keep.push(...segs); return; }   // angrenzend → verlängern
+        if (!gap) { for (let i = 0; i < keep.length; i++) if (typeof keep[i] === 'string') keep[i] = { id: keep[i], start: ph.start, end: ph.end }; if (isAfter) ph.end = ge; else ph.start = gs; keep.push(...segs); return; }   // angrenzend → verlängern
         const nb = { label: bar.label || '', cat: bar.cat, start: gs, end: ge,
           phases: [{ trade: ph.trade, start: gs, end: ge, days: daysCount(gs, ge, !!ph.weekend), weekend: !!ph.weekend, count: new Set(segs.map(x => x.id)).size, assigned: segs }] };
         if (ph.overnight) nb.phases[0].overnight = true;
@@ -649,16 +652,20 @@
   const rowLabels = (ids) => (ids || []).map(id => { const r = projRows().find(x => x.id === id); return r ? (r.site || r.label) : '?'; });
   function weekReassign(fromId, fromDate, toId, toDate, projectIds) {
     if (fromId === toId && fromDate === toDate) return;
-    const names = rowLabels(projectIds), D = parse(fromDate);
+    const names = rowLabels(projectIds), D = parse(fromDate), weekendMoves = [];
     for (const row of projRows()) {
       if ((projectIds || []).indexOf(row.id) < 0) continue;
       for (const bar of row.bars) for (const ph of phasesOf(bar)) {
         const here = assignedRanges(ph).some(r => r.id === fromId && parse(r.start) <= D && parse(r.end) >= D);
         if (!here) continue;
         removeFromPhase(ph, fromId, fromDate);
-        addToPhase(ph, toId, toDate);
+        const T = parse(toDate);
+        if (!ph.weekend && !isWorkdayMs(T)) weekendMoves.push({ row, bar, trade: ph.trade || 'edelstahl' });   // Werktags-Phase → am Wochenende eigene Phase
+        else if (T < parse(ph.start) || T > parse(ph.end)) { pinWhole(ph); addToPhase(ph, toId, toDate); }
+        else addToPhase(ph, toId, toDate);
       }
     }
+    for (const m of weekendMoves) assignWeekProject(toId, parse(toDate), m.row, m.trade, { bar: m.bar });
     const proj = (names && names.length) ? names.join(', ') : 'Einsatz';
     if (fromId === toId) logChange(`${proj}: ${monteurName(fromId)} von ${fmt(parse(fromDate))} auf ${fmt(parse(toDate))} verschoben`, 'woche');
     else logChange(`${proj}: Übergabe von ${monteurName(fromId)} an ${monteurName(toId)} am ${fmt(parse(toDate))}`, 'woche');
@@ -1069,7 +1076,10 @@
       const nsMs = parse(ns), neMs = parse(ph.end);
       ph.assigned = (ph.assigned || []).map(a => {
         if (typeof a === 'string') return a;                       // ganze Phase → wandert automatisch mit
-        let rs = parse(psh(a.start)), re = parse(psh(a.end));
+        // Länge in Arbeitstagen beibehalten, Beginn auf einen Arbeitstag (sonst landen Einzeltage auf dem Wochenende)
+        const n = daysCount(a.start, a.end, ph.weekend);
+        let s2 = psh(a.start); if (!ph.weekend) s2 = snapWorkday(s2);
+        let rs = parse(s2), re = parse(endFromDays(s2, n, ph.weekend));
         if (rs < nsMs) rs = nsMs; if (re > neMs) re = neMs;        // auf neues Phasenfenster begrenzen
         if (rs > re) return null;
         return { id: a.id, start: isoStr(rs), end: isoStr(re) };
@@ -1096,6 +1106,7 @@
     if (before.bl.length) parts.push('Bauleitung mit verschoben: ' + before.bl.map(monteurName).join(', '));
     return parts.join(' · ');
   }
+  let barDragging = false;
   function attachDrag(b, opts) {
     opts = opts || {};
     b.addEventListener('pointerdown', (e) => {
@@ -1108,7 +1119,7 @@
       const ox1 = dayIndex(parse(bar.end), startMs);
       const startX = e.clientX;
       let nx0 = ox0, nx1 = ox1, moved = false;
-      b.classList.add('dragging'); b.setPointerCapture(e.pointerId);
+      b.classList.add('dragging'); b.setPointerCapture(e.pointerId); barDragging = true;
       const onMove = (ev) => {
         const delta = Math.round((ev.clientX - startX) / dayWidth);
         if (Math.abs(ev.clientX - startX) > 3) moved = true;
@@ -1122,7 +1133,7 @@
       const onUp = () => {
         b.removeEventListener('pointermove', onMove);
         b.removeEventListener('pointerup', onUp);
-        b.classList.remove('dragging');
+        b.classList.remove('dragging'); barDragging = false;
         if (!moved && mode === 'move') { (opts.onClick ? opts.onClick() : openEditor(b._row, bar, false)); return; }
         if (nx0 !== ox0 || nx1 !== ox1) {
           const before = shiftSnap(bar);
@@ -2912,7 +2923,7 @@
     let ph = sameTrade.find(p => parse(p.start) <= ms && parse(p.end) >= ms)
       || sameTrade.find(p => (ms > parse(p.end) && !workBetween(parse(p.end), ms, p.weekend)) || (ms < parse(p.start) && !workBetween(ms, parse(p.start), p.weekend)));
     if (!ph) { ph = { trade: gewerk, start: dISO, end: dISO, days: 1, weekend: weekendDay, count: 1, assigned: [] }; bar.phases.push(ph); }
-    else { if (ms < parse(ph.start)) ph.start = dISO; if (ms > parse(ph.end)) ph.end = dISO; }
+    else if (ms < parse(ph.start) || ms > parse(ph.end)) { pinWhole(ph); if (ms < parse(ph.start)) ph.start = dISO; if (ms > parse(ph.end)) ph.end = dISO; }
     const span = daysCount(ph.start, ph.end, !!ph.weekend);
     if (!(isHalf(ph) && Math.ceil(+ph.days) === span)) ph.days = span;   // halben Tag behalten, solange die Spanne passt
     addToPhase(ph, pid, dISO);
@@ -2996,6 +3007,7 @@
     curCellCtx.carInit = wCar.value;
     document.getElementById('w-car-wrap').style.display = vehicles().length ? '' : 'none';
     document.getElementById('w-night').checked = effNight(key, allDer[key]);
+    curCellCtx.nightInit = document.getElementById('w-night').checked;
     const blank = !note && !der.projects.length && !der.urlaub;
     wText.value = note ? note.text : (blank ? (CELL_TYPE_TEXT[wType.value] || '') : '');
     // Löschen anzeigen, wenn es eine manuelle Notiz ODER einen Zeitplan-Einsatz zum Entfernen gibt
@@ -3050,8 +3062,8 @@
     const carNew = (PLAN.cars || {})[curCell] || '';
     // 4) Übernachtung nach diesem Tag (Vorgabe kommt aus der Phase; gespeichert wird nur die Abweichung)
     const nOld = effNight(curCell, weekDerived()[curCell]);   // nach dem Neusetzen der Baustellen
-    const nNew = document.getElementById('w-night').checked;
-    setNight(curCell, nNew, weekDerived()[curCell]);
+    let nNew = nOld;
+    if (document.getElementById('w-night').checked !== curCellCtx.nightInit) { nNew = document.getElementById('w-night').checked; setNight(curCell, nNew, weekDerived()[curCell]); }
     if (nNew !== nOld) parts.push(nNew ? 'Übernachtung' : 'keine Übernachtung');
     if (carNew !== carOld) parts.push('Fahrzeug: ' + (carNew === 'none' ? 'keines' : carNew ? (vehById(carNew) || {}).name : 'Stammfahrzeug'));
     logChange(`${who} am ${day} – ${parts.length ? parts.join(' · ') : 'keine Änderung'}`, 'woche');
@@ -3091,7 +3103,7 @@
     const derW = weekDerived(), nOn = document.getElementById('w-night').checked;
     for (const i of nightDays) {
       const iso = isoStr(addDays(selMonday, i)), k = akey(curCellCtx.pid, iso);
-      setNight(k, i < 4 && nOn, derW[k]);
+      if (nOn !== curCellCtx.nightInit) setNight(k, i < 4 && nOn, derW[k]);   // nur wenn das Häkchen aktiv geändert wurde
       if (carChanged) setCar(curCellCtx.pid, iso, carVal, derW);
     }
     const who = cellPersonName();
@@ -3789,6 +3801,10 @@
     return t + (nth ? (nth + 1) : '');
   }
   function tiDraftName(row, bar, phIdx, legacy) {
+    if (legacy === 'id') {   // bleibt gleich, auch wenn Projekt/Montage umbenannt wird
+      const idxs0 = tiIdxs(bar, phIdx);
+      return 'id__' + row.id + (bar ? '__b' + tiHash(String(bar.bid || bar.start || '')) : '') + (idxs0.length ? '__' + idxs0.map(i => tiPhaseId(bar, i)).join('-') : '') + '.json';
+    }
     const name = bar ? (bar.label || row.site || row.label || '') : (row.site || row.label || '');
     const base = ((row.nummer ? row.nummer + ' ' : '') + name)
       .replace(/[^0-9A-Za-zÄÖÜäöüß ._-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
@@ -3905,7 +3921,8 @@
     if (!fresh && window.Cloud && Cloud.isReady()) {
       tiStatus.textContent = 'lade Zwischenstand …';
       try {
-        state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase));
+        state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase, 'id'));
+        if (!state && seq === tiSeq) state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase));
         if (!state && seq === tiSeq) state = await Cloud.loadDraft(tiDraftName(tiProject, tiBar, tiPhase, true));
         if (state && state.__cleared) state = null;   // bewusst geleert
       } catch (e) { /* kein Draft / offline */ }
@@ -3941,13 +3958,13 @@
     else if (m.type === 'ti-save') {
       if (!(window.Cloud && Cloud.isReady())) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: 'nicht angemeldet' }, TI_ORIGIN); tiStatus.textContent = 'nicht gespeichert – bitte anmelden'; return; }
       tiStatus.textContent = 'speichere …';
-      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, TI_ORIGIN); tiStatus.textContent = 'in SharePoint gespeichert'; }
+      try { await Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase, 'id'), m.state); tiFrame.contentWindow.postMessage({ type: 'ti-saved' }, TI_ORIGIN); tiStatus.textContent = 'in SharePoint gespeichert'; }
       catch (err) { tiFrame.contentWindow.postMessage({ type: 'ti-save-error', msg: (err && err.message) || '' }, TI_ORIGIN); tiStatus.textContent = 'Speichern fehlgeschlagen'; }
     }
     else if (m.type === 'ti-shared') { tiStoreShared(m.fields); }
     else if (m.type === 'ti-reset') {
       // „Formular leeren": auch den gespeicherten Entwurf leeren, sonst käme er beim nächsten Öffnen zurück
-      if (window.Cloud && Cloud.isReady()) Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase), { __cleared: true }).catch(() => {});
+      if (window.Cloud && Cloud.isReady()) Cloud.saveDraft(tiDraftName(tiProject, tiBar, tiPhase, 'id'), { __cleared: true }).catch(() => {});
       tiFresh = true; tiReload();
     }
   });
@@ -4043,7 +4060,8 @@
         if (!(latest > running)) return;
         // Schleifenschutz: wurde für diese Version schon einmal neu geladen und läuft trotzdem die alte → nur Hinweis
         let tried = ''; try { tried = sessionStorage.getItem('montageplanung_upd') || ''; } catch (e) {}
-        const loginReturn = /[#&](code|error|state)=/.test(location.hash);   // gerade von der Microsoft-Anmeldung zurück → nicht wegnavigieren
+        let msalBusy = false; try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i) || ''; if (/interaction\.status|request\.params|urlHash/i.test(k)) msalBusy = true; } } catch (e) {}
+        const loginReturn = msalBusy || /[#&](code|error|state)=/.test(location.hash);   // Anmeldung läuft → nicht wegnavigieren
         if (tried !== String(latest) && !loginReturn && (atStart || (document.visibilityState === 'visible' && safe()))) {
           try { sessionStorage.setItem('montageplanung_upd', String(latest)); } catch (e) {}
           location.href = freshUrl(latest);
@@ -4066,7 +4084,7 @@
       if (mode === 'merge') { histSync(); updateUndoUI(); } else { histReset(); revealApp(); }   // Abgleich im Hintergrund: Ansicht nicht verspringen
     });
     // Solange ein Dialog/die Termineinladung offen ist, nicht abgleichen – die Maske hält Verweise auf die Daten
-    Cloud.onCanSync(() => !['overlay', 'poverlay', 'roverlay', 'moverlay', 'bloverlay', 'woverlay', 'soverlay'].some(id => { const o = document.getElementById(id); return o && !o.hidden; }) && (!tiView || tiView.hidden));
+    Cloud.onCanSync(() => !barDragging && !['overlay', 'poverlay', 'roverlay', 'moverlay', 'bloverlay', 'woverlay', 'soverlay'].some(id => { const o = document.getElementById(id); return o && !o.hidden; }) && (!tiView || tiView.hidden));
     // Login-Gate: erst nach erfolgreicher Anmeldung die App zeigen (keine Demodaten für Unangemeldete)
     Promise.resolve(Cloud.init()).then((authed) => { if (authed) revealApp(); else showGateLogin(); kdInit(); });
   } else {
