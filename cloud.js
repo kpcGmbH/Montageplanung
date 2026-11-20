@@ -54,7 +54,7 @@ window.Cloud = (function () {
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   function idKeyOf(arr) {   // Schlüssel, über den ein Array zuverlässig zusammengeführt werden kann
     if (!Array.isArray(arr) || !arr.length) return null;
-    for (const k of ['id', 'bid', 'pid', 'name']) if (arr.every(e => e && typeof e === 'object' && e[k] != null)) return k;
+    for (const k of ['id', 'bid', 'pid', 'name']) if (arr.every(e => e && typeof e === 'object' && e[k] != null) && new Set(arr.map(e => e[k])).size === arr.length) return k;   // nur eindeutige Schlüssel (sonst als Menge)
     return null;
   }
   const mapBy = (arr, k) => { const m = new Map(); if (Array.isArray(arr)) for (const e of arr) m.set(e[k], e); return m; };

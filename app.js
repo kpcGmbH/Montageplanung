@@ -563,11 +563,14 @@
     return out;
   }
   // ---- Bauleitung am Montagefenster (bar.bl) – analog zu den Monteur-Phasen, aber ohne Gewerk ----
-  const blRanges = (bar) => (bar.bl || []).map(a => (typeof a === 'string' ? { id: a, start: bar.start, end: bar.end } : { id: a.id, start: a.start, end: a.end }));
-  function addToBl(bar, id, dayISO) {
+  // Tätigkeiten der Bauleitung (je Tag/Bereich); ohne Angabe = allgemeine Bauleitung
+  const BL_TASKS = { '': 'Bauleitung', installationskontrolle: 'Installationskontrolle', aufmass: 'Aufmaß', begehung: 'Baustellenbegehung', baubesprechung: 'Baubesprechung', abnahme: 'Abnahme', uebergabe: 'Übergabe / Einweisung' };
+  const blTaskLabel = (k) => BL_TASKS[k || ''] || k || 'Bauleitung';
+  const blRanges = (bar) => (bar.bl || []).map(a => (typeof a === 'string' ? { id: a, start: bar.start, end: bar.end, task: '' } : { id: a.id, start: a.start, end: a.end, task: a.task || '' }));
+  function addToBl(bar, id, dayISO, task) {
     bar.bl = bar.bl || [];
     const D = parse(dayISO);
-    if (!blRanges(bar).some(r => r.id === id && parse(r.start) <= D && parse(r.end) >= D)) bar.bl.push({ id, start: dayISO, end: dayISO });
+    if (!blRanges(bar).some(r => r.id === id && parse(r.start) <= D && parse(r.end) >= D)) bar.bl.push(Object.assign({ id, start: dayISO, end: dayISO }, task ? { task } : {}));
   }
   function removeFromBl(bar, id, dayISO) {
     if (!bar.bl) return;
@@ -575,7 +578,7 @@
     for (const a of bar.bl) {
       const r = (typeof a === 'string') ? { id: a, start: bar.start, end: bar.end } : { id: a.id, start: a.start, end: a.end };
       if (r.id !== id || parse(r.start) > D || parse(r.end) < D) { next.push(a); continue; }
-      for (const seg of splitRange(r.id, r.start, r.end, dayISO)) next.push(seg);
+      for (const seg of splitRange(r.id, r.start, r.end, dayISO)) next.push(typeof a !== 'string' && a.task ? Object.assign(seg, { task: a.task }) : seg);
     }
     bar.bl = next;
   }
@@ -771,7 +774,7 @@
     }
     // Bauleitung-Zeilen (je zugeordnetem Bauleiter eine Zeile über seine Tage)
     const blById = {}, blOrder = [];
-    for (const r of blRanges(bar)) { if (!blById[r.id]) { blById[r.id] = []; blOrder.push(r.id); } blById[r.id].push({ start: r.start, end: r.end }); }
+    for (const r of blRanges(bar)) { if (!blById[r.id]) { blById[r.id] = []; blOrder.push(r.id); } blById[r.id].push({ start: r.start, end: r.end, task: r.task }); }
     for (const id of blOrder) lanes.push({ bl: true, name: monteurName(id), segments: blById[id] });
     return lanes;
   }
@@ -790,7 +793,8 @@
         d.style.top = top + 'px';
         if (lane.open) d.style.setProperty('--gw', t.color);
         else { d.style.background = 'color-mix(in srgb, ' + t.color + ' 22%, #fff)'; d.style.borderLeftColor = t.color; }
-        d.title = t.label + (lane.open ? ' – noch nicht voll besetzt' : ' · ' + lane.name) + '\n' + fmt(parse(seg.start)) + ' – ' + fmt(parse(seg.end));
+        d.title = (lane.bl ? blTaskLabel(seg.task) : t.label) + (lane.open ? ' – noch nicht voll besetzt' : ' · ' + lane.name) + '\n' + fmt(parse(seg.start)) + ' – ' + fmt(parse(seg.end));
+        if (lane.bl && seg.task) d.textContent = blTaskLabel(seg.task);
         d._row = row; d._bar = windowBar;
         d.addEventListener('click', () => openEditor(row, windowBar, false));
         track.appendChild(d);
@@ -1071,7 +1075,7 @@
     }
     if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
     // Bauleitung wandert mit (sonst zöge die Fenster-Regel das Fenster über die alten Tage zurück)
-    if (bar.bl) bar.bl = bar.bl.map(a => (typeof a === 'string' ? a : { id: a.id, start: sh(a.start), end: sh(a.end) }));
+    if (bar.bl) bar.bl = bar.bl.map(a => (typeof a === 'string' ? a : Object.assign({}, a, { start: sh(a.start), end: sh(a.end) })));
   }
   // Verlaufstext fürs Verschieben: altes → neues Fenster, je Gewerk der Zeitraum und wer mitgewandert ist
   const shiftSnap = (bar) => ({ start: bar.start, end: bar.end, phases: (bar.phases || []).map(p => ({ trade: p.trade, start: p.start, end: p.end })),
@@ -1144,6 +1148,7 @@
   const fCat = document.getElementById('f-cat');
   const fStart = document.getElementById('f-start');
   const fEnd = document.getElementById('f-end');
+  [fStart, fEnd].forEach(inp => inp.addEventListener('change', () => { if (current) renderBlChips(); }));
   let current = null;
 
   for (const key of Object.keys(PLAN.categories)) {
@@ -1151,16 +1156,57 @@
   }
 
   // Bauleitung am Fenster (Arbeitskopie: gewählte Bauleiter-IDs). Kategorie „Bauleitung" = Termin ohne Monteure.
-  let blDraft = new Set();
+  // Bauleitung im Editor: je Bauleiter die einzelnen Tage (mit Tätigkeit) – Arbeitskopie Map id → Map(Tag → Tätigkeit)
+  let blDraft = new Map(), blTaskSel = {};
+  function blWindowDays() {
+    const s0 = fStart.value || (current && current.bar.start), e0 = fEnd.value || (current && current.bar.end);
+    const out = []; if (!s0 || !e0) return out;
+    for (let x = parse(s0); x <= parse(e0); x = addDays(x, 1)) if (isWorkdayMs(x)) out.push(isoStr(x));
+    return out;
+  }
   function renderBlChips() {
     const box = document.getElementById('f-bl'); box.innerHTML = '';
     const rows = bauleiterRows();
     if (!rows.length) { box.appendChild(el('span', 'phase-hint', 'Noch keine Bauleiter angelegt (Button „Bauleiter" oben).')); return; }
+    const pick = el('div', 'f-bl-pick');
     for (const r of rows) {
       const on = blDraft.has(r.id), chip = el('span', 'trade-chip' + (on ? ' on' : ''), r.label || 'Bauleiter');
       if (on) chip.style.background = '#7e57c2';
-      chip.onclick = () => { if (on) blDraft.delete(r.id); else blDraft.add(r.id); renderBlChips(); };
-      box.appendChild(chip);
+      chip.onclick = () => { if (on) blDraft.delete(r.id); else blDraft.set(r.id, new Map()); renderBlChips(); };
+      pick.appendChild(chip);
+    }
+    box.appendChild(pick);
+    const days = blWindowDays();
+    for (const [id, dmap] of blDraft) {
+      const card = el('div', 'f-bl-card');
+      const head = el('div', 'f-bl-head');
+      head.appendChild(el('b', null, monteurName(id)));
+      const tsel = document.createElement('select'); tsel.title = 'Tätigkeit für die angeklickten Tage';
+      for (const k of Object.keys(BL_TASKS)) { const o = el('option', null, BL_TASKS[k]); o.value = k; tsel.appendChild(o); }
+      tsel.value = blTaskSel[id] || ''; tsel.onchange = () => { blTaskSel[id] = tsel.value; };
+      head.appendChild(el('span', 'phase-hint', 'Tätigkeit:')); head.appendChild(tsel);
+      const all = el('button', 'btn f-bl-mini', 'alle Tage'); all.type = 'button';
+      all.onclick = () => { days.forEach(d => { if (!dmap.has(d)) dmap.set(d, tsel.value); }); renderBlChips(); };
+      const none = el('button', 'btn f-bl-mini', 'keine'); none.type = 'button'; none.onclick = () => { dmap.clear(); renderBlChips(); };
+      head.appendChild(all); head.appendChild(none);
+      card.appendChild(head);
+      const grid = el('div', 'f-bl-days');
+      let lastKw = null;
+      for (const d of days) {
+        const ms = parse(d), kw = isoWeek(ms);
+        if (kw !== lastKw) { grid.appendChild(el('span', 'f-bl-kw', 'KW ' + kw)); lastKw = kw; }
+        const sel = dmap.has(d), task = dmap.get(d);
+        const c = el('span', 'f-bl-day' + (sel ? ' on' : ''), WD_SHORT[new Date(ms).getUTCDay()] + ' ' + fmt(ms).slice(0, 6));
+        if (sel && task) c.appendChild(el('small', null, blTaskLabel(task)));
+        c.title = sel ? blTaskLabel(task) + ' – Klick: Tag entfernen' : 'Klick: an diesem Tag einplanen (' + blTaskLabel(tsel.value) + ')';
+        c.onclick = () => { if (sel) dmap.delete(d); else dmap.set(d, tsel.value); renderBlChips(); };
+        grid.appendChild(c);
+      }
+      card.appendChild(grid);
+      const outside = [...dmap.keys()].filter(d => days.indexOf(d) < 0).length;
+      if (!dmap.size) card.appendChild(el('div', 'phase-hint f-bl-warn', 'Noch kein Tag gewählt – ohne Tage wird der Bauleiter nicht eingetragen.'));
+      else if (outside) card.appendChild(el('div', 'phase-hint f-bl-warn', outside + ' Tag(e) außerhalb des Zeitraums – entfallen beim Speichern.'));
+      box.appendChild(card);
     }
   }
   const isProjRow = (row) => { const g = PLAN.groups.find(x => x.name === 'Projekte'); return !!(g && g.rows.indexOf(row) >= 0); };
@@ -1309,7 +1355,12 @@
     for (const k of ADDR_KEYS) document.getElementById('f-' + k).value = klein ? (bar[k] || '') : '';
     if (klein) { fillKleinList(); fLabel.setAttribute('list', 'kleinList'); } else fLabel.removeAttribute('list');
     // Kontextabhängige Felder
-    blDraft = new Set(blRanges(bar).map(r => r.id)); renderBlChips();
+    blDraft = new Map(); blTaskSel = {};
+    for (const r of blRanges(bar)) {
+      if (!blDraft.has(r.id)) blDraft.set(r.id, new Map());
+      for (let x = parse(r.start); x <= parse(r.end); x = addDays(x, 1)) if (isWorkdayMs(x)) blDraft.get(r.id).set(isoStr(x), r.task || '');
+    }
+    renderBlChips();
     document.getElementById('f-hotel').value = bar.hotel || '';
     document.getElementById('f-hotel-wrap').style.display = isProjRow(row) ? '' : 'none';
     applyCatMode();   // Montage-Phasen nur bei Projekten (nicht bei Kategorie „Bauleitung"), Bauleitung nur bei Projekten
@@ -1396,17 +1447,21 @@
       if (isProject) {
       bar.phases = newPhases;
       delete bar.crew;
-      // Bauleitung: abgewählte entfernen, taggenaue Bereiche (aus der Woche) aufs Fenster begrenzen, neue = ganzes Fenster
+      // Bauleitung: gewählte Tage je Bauleiter (im Zeitraum), aufeinanderfolgende Werktage mit gleicher Tätigkeit zusammengefasst
       const bl = [];
-      for (const id of blDraft) {
-        const had = (bar.bl || []).filter(a => idOf(a) === id).map(a => {
-          if (typeof a === 'string') return a;
-          const rs = a.start > s ? a.start : s, re = a.end < e ? a.end : e;
-          return rs > re ? null : { id, start: rs, end: re };
-        }).filter(Boolean);
-        if (had.length) bl.push(...had);
-        else if (!(bar.bl || []).some(a => idOf(a) === id)) bl.push(id);   // neu gewählt = ganzes Fenster; alte Tage außerhalb entfallen
+      for (const [id, dmap] of blDraft) {
+        const days = [...dmap.keys()].filter(d => d >= s && d <= e).sort();
+        let cur = null;
+        for (const d of days) {
+          const task = dmap.get(d) || '';
+          let gapFree = false;
+          if (cur && cur.task === task) { gapFree = true; for (let x = addDays(parse(cur.end), 1); x < parse(d); x = addDays(x, 1)) if (isWorkdayMs(x)) { gapFree = false; break; } }
+          if (gapFree) cur.end = d;
+          else { if (cur) bl.push(cur); cur = { id, start: d, end: d, task }; }
+        }
+        if (cur) bl.push(cur);
       }
+      bl.forEach(x => { if (!x.task) delete x.task; });
       if (bl.length) bar.bl = bl; else delete bar.bl;
       const hotel = document.getElementById('f-hotel').value.trim();
       if (hotel) bar.hotel = hotel; else delete bar.hotel;
@@ -2031,7 +2086,8 @@
         }
         // Bauleitung: dem Bauleiter die Baustelle des Tages zuordnen
         for (const r of blRanges(bar)) {
-          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, null); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shown) < 0) c.labels.push(shown); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
+          const shownBl = shown + (r.task ? ' · ' + blTaskLabel(r.task) : '');
+          eachWorkday(r.start, r.end, (ms) => { const c = get(r.id, ms); addTi(c, null); if (c.projects.indexOf(name) < 0) c.projects.push(name); if (c.labels.indexOf(shownBl) < 0) c.labels.push(shownBl); if (addrLine && c.addrs.indexOf(addrLine) < 0) c.addrs.push(addrLine); if (unconf) c.unconfirmed = true; });
         }
       }
     }
@@ -2715,6 +2771,12 @@
       for (const r of projRows()) { const o = el('option', null, r.site ? (r.site + ' · ' + r.label) : r.label); o.value = r.id; psel.appendChild(o); }
       psel.value = entry.rowId; psel.onchange = () => { entry.rowId = psel.value; delete entry.bar; entry.label = ''; setAddr(entry, null); renderProjRows(); };
       rowEl.appendChild(psel);
+      if (curCellIsBl) {   // Bauleiter: Tätigkeit statt Gewerk
+        const tsel = document.createElement('select'); tsel.className = 'w-proj-gewerk'; tsel.title = 'Tätigkeit';
+        for (const k of Object.keys(BL_TASKS)) { const o = el('option', null, BL_TASKS[k]); o.value = k; tsel.appendChild(o); }
+        tsel.value = entry.task || ''; tsel.onchange = () => { entry.task = tsel.value; };
+        rowEl.appendChild(tsel);
+      }
       if (!curCellIsBl) {   // Gewerk-Auswahl nur bei Monteuren
         const gsel = document.createElement('select'); gsel.className = 'w-proj-gewerk';
         for (const k of Object.keys(TRADES())) { const o = el('option', null, TRADES()[k].label); o.value = k; gsel.appendChild(o); }
@@ -2841,7 +2903,7 @@
     const bar = weekEntryBar(row, ms, entry, true);
     // Neu aus der Woche erzeugt: reiner Bauleitungs-Termin (kein Monteur-Bedarf, nicht unter „Bestätigte Montagen")
     if (row.bars.length > before) { bar.cat = 'bauleitung'; if (bar.label === 'Montage') bar.label = 'Bauleitung'; }
-    addToBl(bar, blId, isoStr(ms));
+    addToBl(bar, blId, isoStr(ms), entry && entry.task);
     save();
   }
   // Leere, per Woche erzeugte Montagefenster (keine Monteure UND keine Bauleitung) entfernen – keine Fragmente.
@@ -2863,7 +2925,7 @@
     const out = [], on = (r) => r.id === person.id && parse(r.start) <= ms && parse(r.end) >= ms;
     for (const row of projRows()) for (const b of row.bars) {
       const extra = isKleinRow(row) ? { label: b.label || '', strasse: b.strasse || '', plz: b.plz || '', ort: b.ort || '' } : {};
-      if (isBl) { if (blRanges(b).some(on)) out.push(Object.assign({ rowId: row.id, bl: true, bar: b }, extra)); continue; }
+      if (isBl) { const hit = blRanges(b).find(on); if (hit) out.push(Object.assign({ rowId: row.id, bl: true, bar: b, task: hit.task || '' }, extra)); continue; }
       const workday = isWorkdayMs(ms);
       for (const ph of (b.phases || [])) if ((workday || ph.weekend) && assignedRanges(ph).some(on))
         out.push(Object.assign({ rowId: row.id, gewerk: (ph.trade && TRADES()[ph.trade]) ? ph.trade : firstTradeOf(person), bar: b }, extra));
