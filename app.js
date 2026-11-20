@@ -570,7 +570,10 @@
   function addToBl(bar, id, dayISO, task) {
     bar.bl = bar.bl || [];
     const D = parse(dayISO);
-    if (!blRanges(bar).some(r => r.id === id && parse(r.start) <= D && parse(r.end) >= D)) bar.bl.push(Object.assign({ id, start: dayISO, end: dayISO }, task ? { task } : {}));
+    const hit = blRanges(bar).find(r => r.id === id && parse(r.start) <= D && parse(r.end) >= D);
+    if (hit && (hit.task || '') === (task || '')) return;
+    if (hit) removeFromBl(bar, id, dayISO);   // anderer Tätigkeit an diesem Tag → ersetzen
+    bar.bl.push(Object.assign({ id, start: dayISO, end: dayISO }, task ? { task } : {}));
   }
   function removeFromBl(bar, id, dayISO) {
     if (!bar.bl) return;
@@ -775,7 +778,7 @@
     // Bauleitung-Zeilen (je zugeordnetem Bauleiter eine Zeile über seine Tage)
     const blById = {}, blOrder = [];
     for (const r of blRanges(bar)) { if (!blById[r.id]) { blById[r.id] = []; blOrder.push(r.id); } blById[r.id].push({ start: r.start, end: r.end, task: r.task }); }
-    for (const id of blOrder) lanes.push({ bl: true, name: monteurName(id), segments: blById[id] });
+    for (const id of blOrder) { const ts = [...new Set(blById[id].map(x => x.task || ''))]; lanes.push({ bl: true, name: monteurName(id) + (ts.length === 1 && ts[0] ? ' · ' + blTaskLabel(ts[0]) : ts.length > 1 ? ' · ' + ts.map(blTaskLabel).join(' / ') : ''), segments: blById[id] }); }
     return lanes;
   }
   function renderLanes(track, row, windowBar, lanes, yBase) {
@@ -794,7 +797,6 @@
         if (lane.open) d.style.setProperty('--gw', t.color);
         else { d.style.background = 'color-mix(in srgb, ' + t.color + ' 22%, #fff)'; d.style.borderLeftColor = t.color; }
         d.title = (lane.bl ? blTaskLabel(seg.task) : t.label) + (lane.open ? ' – noch nicht voll besetzt' : ' · ' + lane.name) + '\n' + fmt(parse(seg.start)) + ' – ' + fmt(parse(seg.end));
-        if (lane.bl && seg.task) d.textContent = blTaskLabel(seg.task);
         d._row = row; d._bar = windowBar;
         d.addEventListener('click', () => openEditor(row, windowBar, false));
         track.appendChild(d);
@@ -1075,7 +1077,12 @@
     }
     if (bar.crew && bar.crew.start) { bar.crew.start = sh(bar.crew.start); bar.crew.end = sh(bar.crew.end || bar.crew.start); }
     // Bauleitung wandert mit (sonst zöge die Fenster-Regel das Fenster über die alten Tage zurück)
-    if (bar.bl) bar.bl = bar.bl.map(a => (typeof a === 'string' ? a : Object.assign({}, a, { start: sh(a.start), end: sh(a.end) })));
+    // Bauleitung: Beginn auf den nächsten Werktag, Länge in Werktagen beibehalten (nicht aufs Wochenende rutschen)
+    if (bar.bl) bar.bl = bar.bl.map(a => {
+      if (typeof a === 'string') return a;
+      const n = daysCount(a.start, a.end, false), ns = snapWorkday(sh(a.start));
+      return Object.assign({}, a, { start: ns, end: endFromDays(ns, n, false) });
+    });
   }
   // Verlaufstext fürs Verschieben: altes → neues Fenster, je Gewerk der Zeitraum und wer mitgewandert ist
   const shiftSnap = (bar) => ({ start: bar.start, end: bar.end, phases: (bar.phases || []).map(p => ({ trade: p.trade, start: p.start, end: p.end })),
@@ -1178,6 +1185,9 @@
     box.appendChild(pick);
     const days = blWindowDays();
     for (const [id, dmap] of blDraft) {
+      // gewählte Wochenendtage im Zeitraum mit anzeigen (sonst unsichtbar und nicht abwählbar)
+      const s0 = days[0], e0 = days[days.length - 1];
+      const shown = days.concat([...dmap.keys()].filter(d => days.indexOf(d) < 0 && s0 && d >= (fStart.value || s0) && d <= (fEnd.value || e0))).sort();
       const card = el('div', 'f-bl-card');
       const head = el('div', 'f-bl-head');
       head.appendChild(el('b', null, monteurName(id)));
@@ -1192,7 +1202,7 @@
       card.appendChild(head);
       const grid = el('div', 'f-bl-days');
       let lastKw = null;
-      for (const d of days) {
+      for (const d of shown) {
         const ms = parse(d), kw = isoWeek(ms);
         if (kw !== lastKw) { grid.appendChild(el('span', 'f-bl-kw', 'KW ' + kw)); lastKw = kw; }
         const sel = dmap.has(d), task = dmap.get(d);
@@ -1203,7 +1213,7 @@
         grid.appendChild(c);
       }
       card.appendChild(grid);
-      const outside = [...dmap.keys()].filter(d => days.indexOf(d) < 0).length;
+      const outside = [...dmap.keys()].filter(d => shown.indexOf(d) < 0).length;
       if (!dmap.size) card.appendChild(el('div', 'phase-hint f-bl-warn', 'Noch kein Tag gewählt – ohne Tage wird der Bauleiter nicht eingetragen.'));
       else if (outside) card.appendChild(el('div', 'phase-hint f-bl-warn', outside + ' Tag(e) außerhalb des Zeitraums – entfallen beim Speichern.'));
       box.appendChild(card);
@@ -1358,7 +1368,8 @@
     blDraft = new Map(); blTaskSel = {};
     for (const r of blRanges(bar)) {
       if (!blDraft.has(r.id)) blDraft.set(r.id, new Map());
-      for (let x = parse(r.start); x <= parse(r.end); x = addDays(x, 1)) if (isWorkdayMs(x)) blDraft.get(r.id).set(isoStr(x), r.task || '');
+      const whole = typeof (bar.bl || []).find(a => idOf(a) === r.id) === 'string';
+      for (let x = parse(r.start); x <= parse(r.end); x = addDays(x, 1)) if (isWorkdayMs(x) || (!whole && (isoStr(x) === r.start || isoStr(x) === r.end))) blDraft.get(r.id).set(isoStr(x), r.task || '');
     }
     renderBlChips();
     document.getElementById('f-hotel').value = bar.hotel || '';
@@ -1424,8 +1435,16 @@
     const stillOn = new Map();
     for (const ph of (newPhases || [])) for (const r of assignedRanges(ph)) for (let ms = parse(r.start); ms <= parse(r.end); ms = addDays(ms, 1)) { if (!stillOn.has(r.id)) stillOn.set(r.id, new Set()); stillOn.get(r.id).add(isoStr(ms)); }
     const lostTxt = [...lost].map(([id, days]) => [id, days.filter(d => !(stillOn.get(id) || new Set()).has(d))]).filter(x => x[1].length).map(([id, days]) => monteurName(id) + ' (' + dayList(days) + ')');
+    {   // Bauleitungs-Tage, die durch den geänderten Zeitraum entfallen
+      const s1 = fStart.value || bar.start, e1 = fEnd.value || bar.end;
+      for (const [id, dmap] of (isProject ? blDraft : new Map())) {
+        const out = [...dmap.keys()].filter(d => d < s1 || d > e1);
+        if (out.length) lostTxt.push(monteurName(id) + ' – Bauleitung (' + dayList(out) + ')');
+      }
+    }
     if (lostTxt.length && !confirm('Durch den geänderten Zeitraum der Phase entfallen taggenaue Einsätze:\n\n• ' + lostTxt.join('\n• ') + '\n\nTrotzdem speichern?\n(Abbrechen = zurück zur Maske, z. B. um die Montagetage anzupassen)')) return;
     const idsBefore = new Set((bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)));
+    const blBefore = new Set(blRanges(bar).map(r => r.id));
     delete bar.weekgen;   // manuell bearbeitet → als echtes Fenster behandeln (nicht mehr als Woche-Fragment auto-aufräumen)
     bar.label = fLabel.value.trim();
     if (isKleinRow(row)) setAddr(bar, { strasse: document.getElementById('f-strasse').value, plz: document.getElementById('f-plz').value, ort: document.getElementById('f-ort').value });
@@ -1474,7 +1493,9 @@
     // Im Verlauf festhalten, wer dazugekommen / herausgefallen ist und welche Tage gekürzt wurden
     const idsAfter = new Set((bar.phases || []).flatMap(ph => (ph.assigned || []).map(idOf)));
     const added = [...idsAfter].filter(id => !idsBefore.has(id)).map(monteurName), removed = [...idsBefore].filter(id => !idsAfter.has(id)).map(monteurName);
-    const diff = (current.isNew ? '' : (added.length ? ' · neu: ' + added.join(', ') : '') + (removed.length ? ' · entfernt: ' + removed.join(', ') : '')) + (lostTxt.length ? ' · Tage entfallen: ' + lostTxt.join('; ') : '');
+    const blAfter = new Set(blRanges(bar).map(r => r.id));
+    const blAdd = [...blAfter].filter(id => !blBefore.has(id)).map(monteurName), blRem = [...blBefore].filter(id => !blAfter.has(id)).map(monteurName);
+    const diff = (current.isNew ? '' : (added.length ? ' · neu: ' + added.join(', ') : '') + (removed.length ? ' · entfernt: ' + removed.join(', ') : '') + (blAdd.length ? ' · Bauleitung neu: ' + blAdd.join(', ') : '') + (blRem.length ? ' · Bauleitung entfernt: ' + blRem.join(', ') : '')) + (lostTxt.length ? ' · Tage entfallen: ' + lostTxt.join('; ') : '');
     const who = (asgNames.length ? ' · Monteure: ' + asgNames.join(', ') : '') + (blNames.length ? ' · Bauleitung: ' + blNames.join(', ') : '') + diff;
     logChange(`Termin „${barNm}" (${rowNm}) ${current.isNew ? 'angelegt' : 'bearbeitet'} → ${fmt(parse(bar.start))}–${fmt(parse(bar.end))}${who}`, 'zeitplan');
     save(); render(); closeEditor();
@@ -1925,12 +1946,12 @@
     return vehicles().find(v => { const d = (v.driver || '').trim().toLowerCase(); return d && (d === n || d.startsWith(n + ' ') || n.startsWith(d + ' ')); }) || null;
   }
   // Einsatztag = Baustelle oder ein Termin, zu dem man fährt (nicht frei / n.v. / Büro)
-  function carActive(pid, iso, derived) {
+  function carActive(pid, iso, derived, noSvc) {
     const k = akey(pid, iso), d = derived[k], a = assignments[k];
     const note = (a && a.type !== 'baustelle') ? a : null;
     if (note && ABSENCE_TYPES.has(note.type)) return false;
     if (d && d.urlaub && !(d.projects || []).length) return false;
-    return !!((d && d.projects.length) || (note && note.type !== 'buero') || svcDay(pid, parse(iso)).length);
+    return !!((d && d.projects.length) || (note && note.type !== 'buero') || (!noSvc && svcDay(pid, parse(iso)).length));
   }
   // Hat die Person an dem Tag überhaupt etwas (Baustelle oder Termin, keine Abwesenheit)?
   function carPresent(pid, iso, derived) {
@@ -1968,7 +1989,7 @@
     PLAN.cars = PLAN.cars || {};
     const k = akey(pid, iso), def = defaultVehOf(pid);
     // Stammfahrzeug nur dann „ohne Eintrag", wenn es an dem Tag ohnehin gilt (Einsatztag); sonst explizit merken
-    const isDefault = def ? (val === def.id && carActive(pid, iso, derived || {})) : val === 'none';
+    const isDefault = def ? (val === def.id && carActive(pid, iso, derived || {}, true)) : val === 'none';   // ohne Kundendienst (den sehen nicht alle)
     if (!val || isDefault) delete PLAN.cars[k]; else PLAN.cars[k] = val;
   }
   // Manuelle Abwesenheit (frei / n.v.) im Wochenkalender? Dann ist die Person an dem Tag NICHT auf dem
@@ -3084,7 +3105,7 @@
     const text = wText.value.trim();
     clip = {
       kind: 'cell',
-      projects: wProjectDraft.map(e => { const c = { rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }; for (const k of ADDR_KEYS) if (k in e) c[k] = e[k]; return c; }),
+      projects: wProjectDraft.map(e => { const c = { rowId: e.rowId, gewerk: e.gewerk, label: e.label || '' }; if (e.bl) c.bl = true; if (e.task) c.task = e.task; for (const k of ADDR_KEYS) if (k in e) c[k] = e[k]; return c; }),
       note: text ? { text, type: wType.value } : null,
       car: document.getElementById('w-car').value !== curCellCtx.carInit ? document.getElementById('w-car').value : null,
       night: document.getElementById('w-night').checked,
@@ -3143,26 +3164,51 @@
   let kdSaveTimer = null;
   // Mehrere Freigegebene schreiben dieselbe Datei: vor dem Speichern den Stand vom Server holen und per
   // 3-Wege-Merge (Basis = zuletzt geladener Stand) zusammenführen, statt die Änderungen der anderen zu überschreiben.
-  let kdBase = [];
+  // Speichern: immer nur EIN Abgleich gleichzeitig. Basis = genau der hochgeladene Stand. Was während des Abgleichs
+  // geändert wurde, bleibt erhalten (3-Wege-Merge gegen den Stand bei Beginn). Mit If-Match: hat jemand anderes in der
+  // Zwischenzeit gespeichert, neu laden und erneut zusammenführen. Bis zum Erfolg liegt eine Sicherung im Browser.
+  let kdBase = [], kdSyncing = false, kdAgain = false, kdRetry = null;
+  const KD_PENDING = 'montageplanung_kundendienst_pending';
+  const kdClone = (x) => JSON.parse(JSON.stringify(x));
+  const kdBusy = () => !!(kdSaveTimer || kdSyncing || kdRetry);
+  function kdBackup() { try { localStorage.setItem(KD_PENDING, JSON.stringify({ base: kdBase, local: kdData, user: window.Cloud && Cloud.account && Cloud.account() })); } catch (e) {} }
   async function kdSync(save) {
     if (!(window.Cloud && Cloud.isReady())) { if (save) { try { localStorage.setItem(KD_LOCAL, JSON.stringify(kdData)); } catch (e) {} } return; }
-    const f = await Cloud.loadFile(KD_FOLDER, KD_FILE);
-    const remote = (f && Array.isArray(f.service)) ? f.service : [];
-    const merged = Cloud.merge3(kdBase, kdData, remote);
-    const changedLocal = JSON.stringify(merged) !== JSON.stringify(remote);
-    if (save || changedLocal) {
-      if (changedLocal) await Cloud.saveFile(KD_FOLDER, KD_FILE, { version: 1, updated: new Date().toISOString(), by: Cloud.account(), service: merged });
-    }
-    kdBase = JSON.parse(JSON.stringify(merged));
-    if (JSON.stringify(merged) !== JSON.stringify(kdData)) {
-      kdData = JSON.parse(JSON.stringify(merged));
-      if (viewMode === 'service' && soverlay.hidden) renderService();
-    }
+    if (kdSyncing) { kdAgain = kdAgain || save; return; }
+    kdSyncing = true;
+    try {
+      const startLocal = kdClone(kdData);
+      let merged = null;
+      for (let tries = 0; tries < 5; tries++) {
+        const { data, etag } = await Cloud.loadFileMeta(KD_FOLDER, KD_FILE);
+        const remote = (data && Array.isArray(data.service)) ? data.service : [];
+        merged = kdClone(Cloud.merge3(kdBase, startLocal, remote));
+        if (JSON.stringify(merged) === JSON.stringify(remote)) break;
+        try { await Cloud.saveFile(KD_FOLDER, KD_FILE, { version: 1, updated: new Date().toISOString(), by: Cloud.account(), service: merged }, etag || undefined); break; }
+        catch (e) { if (e.code !== 412 || tries === 4) throw e; }   // jemand anderes war schneller → neu laden
+      }
+      kdBase = kdClone(merged);
+      // Änderungen, die während des Abgleichs gemacht wurden, auf den neuen Stand legen
+      const now = Cloud.merge3(startLocal, kdData, merged);
+      const changedMeanwhile = JSON.stringify(now) !== JSON.stringify(merged);
+      if (JSON.stringify(now) !== JSON.stringify(kdData)) {
+        kdData = kdClone(now);
+        if (viewMode === 'service' && soverlay.hidden && !document.querySelector('.overlay.kd-tmp')) renderService();
+      }
+      if (changedMeanwhile) kdAgain = true; else { try { localStorage.removeItem(KD_PENDING); } catch (e) {} }
+    } finally { kdSyncing = false; }
+    if (kdAgain) { kdAgain = false; kdSave(); }
   }
   function kdSave() {
+    kdBackup();
     clearTimeout(kdSaveTimer);
     kdSaveTimer = setTimeout(async () => {
-      try { await kdSync(true); } catch (e) { toast('Kundendienst: Speichern fehlgeschlagen – ' + (e && e.message || e)); }
+      kdSaveTimer = null;
+      try { await kdSync(true); clearTimeout(kdRetry); kdRetry = null; }
+      catch (e) {
+        toast('Kundendienst: Speichern fehlgeschlagen – neuer Versuch in 20 s (' + (e && e.message || e) + ')');
+        clearTimeout(kdRetry); kdRetry = setTimeout(() => { kdRetry = null; kdSave(); }, 20000);
+      }
     }, 600);
   }
   async function kdInit() {
@@ -3170,7 +3216,16 @@
     document.getElementById('viewService').hidden = !ok;
     if (!ok) { kdData = []; if (viewMode === 'service') setView('timeline'); return; }
     try {
-      if (window.Cloud && Cloud.isReady()) { const f = await Cloud.loadFile(KD_FOLDER, KD_FILE); kdData = (f && Array.isArray(f.service)) ? f.service : []; kdBase = JSON.parse(JSON.stringify(kdData)); }
+      if (window.Cloud && Cloud.isReady()) {
+        const f = await Cloud.loadFile(KD_FOLDER, KD_FILE); kdData = (f && Array.isArray(f.service)) ? f.service : []; kdBase = kdClone(kdData);
+        // nicht angekommene Änderungen aus der letzten Sitzung (gleiches Konto) übernehmen
+        let pend = null; try { pend = JSON.parse(localStorage.getItem(KD_PENDING) || 'null'); } catch (e) {}
+        if (pend && Array.isArray(pend.local) && (!pend.user || pend.user === Cloud.account())) {
+          const m = Cloud.merge3(pend.base || [], pend.local, kdData, true);
+          if (JSON.stringify(m) !== JSON.stringify(kdData)) { kdData = kdClone(m); kdSave(); toast('Kundendienst: nicht gespeicherte Änderungen übernommen'); }
+          else { try { localStorage.removeItem(KD_PENDING); } catch (e) {} }
+        }
+      }
       else kdData = JSON.parse(localStorage.getItem(KD_LOCAL) || '[]');
       if (kdData.map(svcNormalize).some(Boolean)) kdSave();   // Stand/aktiv einmalig aus den Notizen ableiten
     } catch (e) { toast('Kundendienst: Laden fehlgeschlagen – ' + (e && e.message || e)); }
@@ -3193,7 +3248,7 @@
   // Ampel der Fälligkeit: überfällig / bald fällig (≤ 1 Monat) / später; geplant = offener Termin vorhanden
   function svcState(s) {
     const now = ymOf(todayMs());
-    const planned = (s.termine || []).some(t => !t.erledigt && t.start);
+    const planned = svcOpenTermin(s);
     if (planned) return 'planned';
     if (!s.faellig) return 'none';
     if (s.faellig < now) return 'over';
@@ -3204,7 +3259,10 @@
   const S = (id) => document.getElementById(id);
   // ---- Status, aktiv, Lücken, Gruppen ----
   // Bearbeitungsstand vor dem Termin (s.anfrage): '' (offen) → anfragen → angefragt → beauftragt; ein offener Termin = terminiert.
-  const SVC_ST = { offen: 'offen', anfragen: 'anfragen', angefragt: 'angefragt', beauftragt: 'beauftragt', terminiert: 'terminiert' };
+  // offener Termin = nicht erledigt und noch nicht vorbei; vorbei + nicht abgehakt = „abhaken" (fällt wieder auf)
+  const svcOpenTermin = (s) => (s.termine || []).some(t => !t.erledigt && t.start && (t.end || t.start) >= isoStr(todayMs()));
+  const svcStaleTermin = (s) => (s.termine || []).some(t => !t.erledigt && t.start && (t.end || t.start) < isoStr(todayMs()));
+  const SVC_ST = { abhaken: 'Termin abhaken', offen: 'offen', anfragen: 'anfragen', angefragt: 'angefragt', beauftragt: 'beauftragt', terminiert: 'terminiert' };
   const SVC_INACTIVE = /gekünd|beendet|abgelehnt|kein auftrag/i;
   function svcNormalize(s) {   // nach dem Import einmalig: Stand und aktiv aus dem Freitext ableiten
     let ch = false;
@@ -3212,7 +3270,7 @@
     if (s.aktiv === undefined) { s.aktiv = !SVC_INACTIVE.test(s.faelligText || ''); ch = true; }
     return ch;
   }
-  const svcStatus = (s) => (s.termine || []).some(t => !t.erledigt && t.start) ? 'terminiert' : (s.anfrage || 'offen');
+  const svcStatus = (s) => svcOpenTermin(s) ? 'terminiert' : svcStaleTermin(s) ? 'abhaken' : (s.anfrage || 'offen');
   const svcGaps = (s) => { const g = []; if (!s.intervall) g.push('Intervall'); if (!s.faellig) g.push('nächste Wartung'); return g; };
   const svcLast = (s) => (s.history || []).map(h => h.date).filter(Boolean).sort().pop() || '';
   const shortDate = (iso) => iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.' + iso.slice(2, 4) : '';
@@ -3250,7 +3308,7 @@
       if (q && !((s.kunde || '') + ' ' + (s.ort || '') + ' ' + (s.pnr || '')).toLowerCase().includes(q)) return false;
       return flt === 'inactive' ? s.aktiv === false : s.aktiv !== false;
     });
-    const isTodo = (s) => { const st = svcState(s); return (st === 'over' || st === 'soon'); };
+    const isTodo = (s) => { const st = svcState(s); return st === 'over' || st === 'soon' || svcStaleTermin(s); };
     const list = base.filter(s => {
       const st = svcState(s);
       if (flt === 'todo' || flt === 'due') return isTodo(s);
@@ -3450,10 +3508,11 @@
 
   // ---- Dialog ----
   const soverlay = document.getElementById('soverlay');
-  let curSvc = null, svcDraft = null;
+  let curSvc = null, svcDraft = null, svcOrig = null;
   function openServiceDialog(s, ym) {
     curSvc = s || null;
     svcDraft = JSON.parse(JSON.stringify(s || { ort: '', kunde: '', intervall: 1, history: [], angebote: [], termine: [] }));
+    svcOrig = s ? JSON.parse(JSON.stringify(s)) : null;   // Stand beim Öffnen – fürs Zusammenführen mit Änderungen anderer
     svcDraft.termine = svcDraft.termine || []; svcDraft.angebote = svcDraft.angebote || []; svcDraft.history = svcDraft.history || [];
     S('sTitle').textContent = s ? 'Wartungsvertrag · ' + svcName(s) : 'Neuer Wartungsvertrag';
     S('s-ort').value = svcDraft.ort || ''; S('s-kunde').value = svcDraft.kunde || ''; S('s-pnr').value = svcDraft.pnr || ''; S('s-vnr').value = svcDraft.vnr || '';
@@ -3526,7 +3585,7 @@
     const d = svcDraft; if (!d) return;
     d.ort = S('s-ort').value.trim(); d.kunde = S('s-kunde').value.trim();
     if (!d.kunde) { S('s-kunde').focus(); return; }
-    d.pnr = S('s-pnr').value.trim(); d.vnr = S('s-vnr').value.trim(); d.intervall = +S('s-intervall').value || 0;
+    d.pnr = S('s-pnr').value.trim(); d.vnr = S('s-vnr').value.trim(); d.intervall = parseFloat(S('s-intervall').value) || 0;
     d.faellig = S('s-faellig').value || ''; if (d.faellig) delete d.faelligText;
     const pr = S('s-preis').value.trim().replace(/\./g, '').replace(',', '.'); d.preis = pr === '' ? '' : (isNaN(+pr) ? S('s-preis').value.trim() : +pr);
     d.abnahme = S('s-abnahme').value.trim(); d.gewende = S('s-gewende').value.trim(); d.doku = S('s-doku').value.trim();
@@ -3543,8 +3602,9 @@
         parts.push('erledigt ' + fmt(parse(t.start)));
       } else if (!was) parts.push('Termin ' + fmt(parse(t.start)) + ((t.wer || []).length ? ' (' + t.wer.map(monteurName).join(', ') + ')' : t.firma ? ' (' + t.firma + ')' : ''));
     }
-    const target = curSvc && (kdData.find(x => x.id === curSvc.id) || curSvc);
-    if (target) { Object.keys(target).forEach(k => delete target[k]); Object.assign(target, d); if (kdData.indexOf(target) < 0) kdData.push(target); }
+    const target = curSvc && kdData.find(x => x.id === curSvc.id);
+    if (curSvc && !target) { alert('Diese Wartung wurde inzwischen von jemand anderem gelöscht.'); closeServiceDialog(); render(); return; }
+    if (target) { const m = Cloud && Cloud.merge3 && svcOrig ? Cloud.merge3(svcOrig, d, kdClone(target)) : d; Object.keys(target).forEach(k => delete target[k]); Object.assign(target, kdClone(m)); }
     else { d.id = 'sv' + Date.now().toString(36); svcList().push(d); }
     kdSave();
     closeServiceDialog(); render();
@@ -3552,7 +3612,7 @@
   S('s-delete').onclick = () => {
     if (!curSvc || !confirm(`Wartungsvertrag „${svcName(curSvc)}" löschen?`)) return;
     const s = curSvc;
-    kdData = kdData.filter(x => x !== s); kdSave();
+    kdData = kdData.filter(x => x.id !== s.id); kdSave();
     closeServiceDialog(); render();
   };
   S('svcAdd').onclick = () => openServiceDialog(null);
@@ -3570,21 +3630,30 @@
     for (const m of s.matchAll(/(\d{1,2})\.\s*(?:\+\s*\d{1,2}\.\s*)?(\d{1,2})\.\s*(\d{2,4})/g)) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; out.push(y + '-' + p2s(m[2]) + '-' + p2s(m[1])); }
     return out.filter(d => !isNaN(parse(d)));
   }
+  // Intervall aus Freitext: „2 x jährlich" → 2, „1x/Jahr" → 1, „alle 2 Jahre" → 0,5, „alle 6 Monate" → 2, sonst 0
+  function svcParseIv(t) {
+    const x = String(t || '').toLowerCase();
+    let m = x.match(/(\d+)\s*(?:x|mal)/); if (m) { const n = +m[1]; const per = x.match(/in\s*(\d+)\s*jahr/); return per ? n / +per[1] : n; }
+    m = x.match(/alle\s*(\d+)\s*jahr/); if (m) return 1 / +m[1];
+    m = x.match(/alle\s*(\d+)\s*monat/); if (m) return 12 / +m[1];
+    return /jährl|jaehrl|järhl|jählich/.test(x) ? 1 : 0;
+  }
   function importServiceWorkbook(wb) {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const ref = XLSX.utils.decode_range(ws['!ref']);
-    const cellTxt = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; if (!x) return ''; if (x.t === 'd' && x.v instanceof Date) return isoStr(Date.UTC(x.v.getFullYear(), x.v.getMonth(), x.v.getDate())); return String(x.w != null ? x.w : x.v).trim(); };
+    const cellTxt = (r, c) => { if (c == null || c < 0) return ''; const x = ws[XLSX.utils.encode_cell({ r, c })]; if (!x) return ''; if (x.t === 'd' && x.v instanceof Date) return isoStr(Date.UTC(x.v.getFullYear(), x.v.getMonth(), x.v.getDate())); return String(x.w != null ? x.w : x.v).trim(); };
     const hdr = []; for (let c = ref.s.c; c <= ref.e.c; c++) hdr[c] = cellTxt(0, c).replace(/\s+/g, ' ').toLowerCase();
     const col = (re) => hdr.findIndex(h => h && re.test(h));
     const C = { ort: col(/^ort/), kunde: col(/^kunde/), vnr: col(/wartungsvertrag/), pnr: col(/^pnr/), abn: col(/abnahme/), gew: col(/gewährleistungsende/), iv: col(/intervall/), next: col(/nächste wartung/), preis: col(/€/), bearb: col(/bearbeiter/), doku: col(/dokumentation/) };
     const termCols = hdr.map((h, c) => (h && /termin\s*\d+\.\s*wartung/.test(h) ? c : -1)).filter(c => c >= 0);
     const firmCols = hdr.map((h, c) => (h && /servicefirma/.test(h) ? c : -1)).filter(c => c >= 0);
-    const lastTerm = Math.max(...termCols), firstFirm = firmCols.length ? Math.min(...firmCols) : ref.e.c + 1;
+    const lastTerm = termCols.length ? Math.max(...termCols) : Math.max(C.preis, C.next, 0), firstFirm = firmCols.length ? Math.min(...firmCols) : ref.e.c + 1;
     const out = []; let lastOrt = '';
     for (let r = 1; r <= ref.e.r; r++) {
-      const kunde = cellTxt(r, C.kunde); if (!kunde) continue;
+      const kunde = cellTxt(r, C.kunde);
+      if (!kunde) { if (cellTxt(r, C.ort)) lastOrt = cellTxt(r, C.ort); continue; }
       const ort = cellTxt(r, C.ort) || lastOrt; lastOrt = ort;
-      const ivTxt = cellTxt(r, C.iv), iv = /2/.test(ivTxt) ? 2 : /1/.test(ivTxt) ? 1 : 0;
+      const ivTxt = cellTxt(r, C.iv), iv = svcParseIv(ivTxt);
       const nx = cellTxt(r, C.next); let faellig = '', faelligText = '';
       const m = nx.match(/^(\d{4})\s*\/?\s*(\d{1,2})/); if (m && +m[2] >= 1 && +m[2] <= 12) faellig = m[1] + '-' + p2s(m[2]); else if (/^\d{4}-\d{2}/.test(nx)) faellig = nx.slice(0, 7); else faelligText = nx;
       const history = [];
@@ -3597,7 +3666,7 @@
       }
       const notes = []; for (let c = lastTerm + 1; c < firstFirm; c++) { if (c === C.bearb) continue; const t = cellTxt(r, c); if (t) notes.push(t.replace(/\s+/g, ' ')); }
       const angebote = []; for (const c of firmCols) { const f = cellTxt(r, c); if (!f) continue; const dt = cellTxt(r, c + 1), pr = cellTxt(r, c + 2); angebote.push({ firma: f.replace(/\s+/g, ' '), datum: (parseDates(dt)[0] ? fmt(parse(parseDates(dt)[0])) : '') + (dt && !/^\d{4}-\d{2}-\d{2}$/.test(dt) && !/^[\d.]+$/.test(dt) ? ' ' + dt.replace(/\s+/g, ' ') : ''), preis: pr.replace(/\s+/g, ' ') }); }
-      const px = ws[XLSX.utils.encode_cell({ r, c: C.preis })], preisTxt = px && px.t === 'n' ? px.v : cellTxt(r, C.preis), preisNum = typeof preisTxt === 'number' ? preisTxt : +String(preisTxt).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
+      const px = C.preis >= 0 ? ws[XLSX.utils.encode_cell({ r, c: C.preis })] : null, preisTxt = px && px.t === 'n' ? px.v : cellTxt(r, C.preis), preisNum = typeof preisTxt === 'number' ? preisTxt : +String(preisTxt).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
       out.push({ id: 'sv' + r + '~' + (kunde + ort).replace(/[^A-Za-z0-9]/g, '').slice(0, 16), ort, kunde, vnr: cellTxt(r, C.vnr), pnr: cellTxt(r, C.pnr), abnahme: cellTxt(r, C.abn), gewende: cellTxt(r, C.gew),
         intervall: iv, faellig, faelligText, preis: preisTxt === '' ? '' : (isNaN(preisNum) ? preisTxt : preisNum), bearbeiter: cellTxt(r, C.bearb), doku: cellTxt(r, C.doku),
         notiz: [ivTxt && !iv ? ivTxt : '', ...notes].filter(Boolean).join(' · '), history, angebote, termine: [] });
@@ -3614,7 +3683,7 @@
       await loadSheetJs();
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
       const rows = importServiceWorkbook(wb);
-      const key = (s) => (s.kunde + '|' + s.ort).toLowerCase().replace(/\s+/g, ' ').trim();
+      const key = (s) => (s.kunde + '|' + s.ort + '|' + (s.pnr || '') + '|' + (s.vnr || '')).toLowerCase().replace(/\s+/g, ' ').trim();
       const have = new Set(svcList().map(key)), add = rows.filter(s => !have.has(key(s)));
       if (!confirm(rows.length + ' Verträge in der Liste gefunden, davon ' + add.length + ' neu.\nJetzt übernehmen?')) return;
       add.forEach(svcNormalize); svcList().push(...add); kdSave();
@@ -3957,7 +4026,7 @@
     if (!running || location.protocol === 'file:') return;
     let banner = null;
     const freshUrl = (v) => location.pathname + '?v=' + v;   // eigene URL → kein zwischengespeichertes index.html
-    const safe = () => !document.querySelector('.overlay:not([hidden])') && tiView.hidden && !(window.Cloud && Cloud.busy && Cloud.busy());
+    const safe = () => !document.querySelector('.overlay:not([hidden])') && tiView.hidden && !(window.Cloud && Cloud.busy && Cloud.busy()) && !kdBusy();
     function showBanner(v) {
       if (banner) return;
       banner = el('div', 'update-banner');

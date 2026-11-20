@@ -76,6 +76,9 @@ window.Cloud = (function () {
       return out;
     }
     let ik = (Array.isArray(local) && Array.isArray(remote)) ? (idKeyOf(local) || idKeyOf(remote)) : null;
+    // Schlüssel muss in ALLEN drei Ständen eindeutig sein – sonst gingen Einträge mit gleichem Schlüssel verloren (z. B. mehrere Tage einer Person)
+    const uniqIn = (arr) => !Array.isArray(arr) || !arr.length || (arr.every(e => e && typeof e === 'object' && e[ik] != null) && new Set(arr.map(e => e[ik])).size === arr.length);
+    if (ik && !(uniqIn(local) && uniqIn(remote) && uniqIn(base))) ik = null;
     // Hat nur eine Seite die Schlüssel (z. B. neue Balken-IDs, alter Stand ohne), nicht darüber mergen – sonst doppelte Einträge
     const hasKey = (arr) => !Array.isArray(arr) || !arr.length || arr.every(e => e && typeof e === 'object' && e[ik] != null);
     if (ik === 'bid' && !(hasKey(local) && hasKey(remote) && hasKey(base))) ik = null;
@@ -281,9 +284,10 @@ window.Cloud = (function () {
   // Termineinladungs-Zwischenstände: je Projekt eine JSON-Datei im Ordner „Termineinladungen/"
   // JSON-Dateien in einem Ordner der Site (Termineinladungen, Kundendienst …)
   const filePath = (folder, name) => '/sites/' + siteId + '/drive/root:/' + folder + '/' + encodeURIComponent(name) + ':/content';
-  async function saveJsonFile(folder, name, obj) {
+  // ifMatch: nur speichern, wenn die Datei seit dem Laden unverändert ist (sonst Fehler mit code 412 → neu laden + zusammenführen)
+  async function saveJsonFile(folder, name, obj, ifMatch) {
     await resolveSite();
-    const put = () => graph(filePath(folder, name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
+    const put = () => graph(filePath(folder, name), { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, ifMatch ? { 'If-Match': ifMatch } : {}), body: JSON.stringify(obj) });
     let r = await put();
     if (r.status === 404) {   // Ordner fehlt → anlegen und erneut versuchen
       await graph('/sites/' + siteId + '/drive/root/children',
@@ -291,16 +295,19 @@ window.Cloud = (function () {
           body: JSON.stringify({ name: folder, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }).catch(() => {});
       r = await put();
     }
+    if (r.status === 412) { const err = new Error('zwischenzeitlich geändert'); err.code = 412; throw err; }
     if (!r.ok) throw new Error('Speichern fehlgeschlagen (' + r.status + ')');
-    return true;
+    const j = await r.json().catch(() => ({}));
+    return j.eTag || j.cTag || true;
   }
-  async function loadJsonFile(folder, name) {
+  async function loadJsonMeta(folder, name) {
     await resolveSite();
     const r = await graph(filePath(folder, name));
-    if (r.status === 404) return null;
+    if (r.status === 404) return { data: null, etag: null };
     if (!r.ok) throw new Error('Laden fehlgeschlagen (' + r.status + ')');
-    return await r.json();
+    return { etag: r.headers.get('ETag') || r.headers.get('etag'), data: await r.json() };
   }
+  async function loadJsonFile(folder, name) { return (await loadJsonMeta(folder, name)).data; }
   const saveDraftFile = (name, obj) => saveJsonFile('Termineinladungen', name, obj);
   const loadDraftFile = (name) => loadJsonFile('Termineinladungen', name);
 
@@ -311,7 +318,8 @@ window.Cloud = (function () {
     inPopup() { return IN_POPUP; },
     saveDraft(name, obj) { return saveDraftFile(name, obj); },
     loadDraft(name) { return loadDraftFile(name); },
-    saveFile(folder, name, obj) { return saveJsonFile(folder, name, obj); },
+    saveFile(folder, name, obj, ifMatch) { return saveJsonFile(folder, name, obj, ifMatch); },
+    loadFileMeta(folder, name) { return loadJsonMeta(folder, name); },
     loadFile(folder, name) { return loadJsonFile(folder, name); },
     account() { return msalAccount && (msalAccount.username || msalAccount.name); },
     onApply(fn) { applyFn = fn; },

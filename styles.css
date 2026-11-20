@@ -784,3 +784,4 @@ a.btn { text-decoration: none; display: inline-block; color: var(--ink); }
 .f-bl-day.on { background: #7e57c2; color: #fff; border-color: #7e57c2; font-weight: 600; }
 .f-bl-day small { font-size: 9px; font-weight: 500; opacity: .9; }
 .f-bl-warn { color: #a35a00; }
+.svc-st.st-abhaken { background: #f6dcd8; color: #a12b1e; }
